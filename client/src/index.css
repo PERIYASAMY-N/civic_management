@@ -1,0 +1,145 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Lexend:wght@400;500;600;700&display=swap');
+
+:root {
+  --primary: #4f46e5;
+  --primary-hover: #4338ca;
+  --secondary: #64748b;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #f43f5e;
+  --bg-main: #f8fafc;
+  --bg-card: #ffffff;
+  --text-main: #1e293b;
+  --text-muted: #64748b;
+  --border: #e2e8f0;
+  --font-body: 'Inter', sans-serif;
+  --font-heading: 'Lexend', sans-serif;
+  --radius: 12px;
+  --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-hover: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+}
+
+:root.dark {
+  --bg-main: #0f172a;
+  --bg-card: #1e293b;
+  --text-main: #f1f5f9;
+  --text-muted: #94a3b8;
+  --border: #334155;
+  --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.3);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-body);
+  background-color: var(--bg-main);
+  color: var(--text-main);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  font-weight: 600;
+}
+
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  outline: none;
+  font-family: inherit;
+  transition: all 0.2s ease;
+}
+
+input, select, textarea {
+  font-family: inherit;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+  outline: none;
+  width: 100%;
+}
+
+input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+}
+
+.btn {
+  padding: 0.75rem 1.5rem;
+  border-radius: var(--radius);
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btn-primary {
+  background-color: var(--primary);
+  color: white;
+}
+
+.btn-primary:hover {
+  background-color: var(--primary-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 15px -3px rgba(79, 70, 229, 0.4);
+}
+
+.glass {
+  background: var(--bg-card);
+  opacity: 0.95;
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+  transition: all 0.3s ease;
+}
+
+.glass:hover {
+  border-color: rgba(79, 70, 229, 0.3);
+  box-shadow: var(--shadow-hover);
+}
+
+/* Issues & Badges */
+.issue-item { display: flex; align-items: center; gap: 1.5rem; padding: 1.5rem; margin-bottom: 1rem; position: relative; overflow: hidden; }
+.status-indicator { width: 4px; height: 100%; position: absolute; left: 0; top: 0; }
+.status-indicator[data-status="pending"] { background: var(--warning); }
+.status-indicator[data-status="in_progress"] { background: var(--primary); }
+.status-indicator[data-status="resolved"] { background: var(--success); }
+
+.status-badge { padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; }
+.status-badge.pending { background: rgba(245, 158, 11, 0.1); color: var(--warning); }
+.status-badge.in_progress { background: rgba(79, 70, 229, 0.1); color: var(--primary); }
+.status-badge.resolved { background: rgba(16, 185, 129, 0.1); color: var(--success); }
+
+.priority-tag { font-size: 0.7rem; font-weight: 700; padding: 0.1rem 0.5rem; border-radius: 4px; text-transform: uppercase; }
+.priority-tag.high { background: rgba(244, 63, 94, 0.1); color: var(--danger); }
+.priority-tag.medium { background: rgba(245, 158, 11, 0.1); color: var(--warning); }
+.priority-tag.low { background: rgba(16, 185, 129, 0.1); color: var(--success); }
+
+@media (max-width: 768px) {
+  .sidebar {
+    width: 80px;
+    padding: 1.5rem 0.5rem;
+  }
+  .sidebar span, .sidebar-logo h1 { display: none; }
+  .nav-item { justify-content: center; padding: 0.875rem; }
+  .dashboard-content header { padding: 1rem 1.5rem; }
+  .content-area { padding: 1.5rem; }
+  .hero-section h2 { font-size: 2.5rem; }
+  .stats-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 480px) {
+  .auth-card { padding: 2rem; }
+  .btn-group { flex-direction: column; }
+}

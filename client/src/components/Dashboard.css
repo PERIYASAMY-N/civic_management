@@ -1,0 +1,143 @@
+.dashboard-container {
+  display: flex;
+  min-height: 100vh;
+  background: var(--bg-main);
+}
+
+.sidebar {
+  width: 260px;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 2rem 0;
+  border-right: 1px solid var(--border);
+}
+
+.sidebar-logo {
+  padding: 0 2rem;
+  margin-bottom: 3rem;
+}
+
+.sidebar-logo h1 { font-size: 1.5rem; }
+.sidebar-logo span { color: var(--primary); }
+
+.sidebar-nav {
+  flex: 1;
+  padding: 0 1rem;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.875rem 1rem;
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+  transition: all 0.2s;
+}
+
+.nav-item:hover, .nav-item.active {
+  background: var(--primary);
+  color: white;
+}
+
+.nav-item.active {
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2);
+}
+
+.nav-item.logout {
+  width: 100%;
+  margin-top: auto;
+  color: var(--danger);
+  border: 1px solid transparent;
+}
+
+.nav-item.logout:hover {
+  background: rgba(244, 63, 94, 0.1);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.sidebar-footer {
+  padding: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.dashboard-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-content header {
+  padding: 1rem 3rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+.role-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  background: rgba(79, 70, 229, 0.1);
+  color: var(--primary);
+  padding: 0.25rem 0.75rem;
+  border-radius: 99px;
+  margin-top: 0.25rem;
+  display: inline-block;
+}
+
+.user-avatar {
+  width: 40px;
+  height: 40px;
+  background: var(--primary);
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+}
+
+.content-area {
+  padding: 3rem;
+  flex: 1;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 2rem;
+  margin-bottom: 3rem;
+}
+
+.stat-card {
+  padding: 1.5rem;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.stat-icon {
+  width: 54px;
+  height: 54px;
+  background: rgba(79, 70, 229, 0.1);
+  color: var(--primary);
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stat-info h4 { color: var(--text-muted); font-size: 0.875rem; }
+.stat-info p { font-size: 1.75rem; font-weight: 700; }

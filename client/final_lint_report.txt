@@ -1,0 +1,11 @@
+
+> client@0.0.0 lint
+> eslint .
+
+
+D:\civic\client\src\pages\AdminDashboard.jsx
+  33:5  warning  Unused eslint-disable directive (no problems were reported from 'react-hooks/set-state-in-effect')
+
+Ô£û 1 problem (0 errors, 1 warning)
+  0 errors and 1 warning potentially fixable with the `--fix` option.
+

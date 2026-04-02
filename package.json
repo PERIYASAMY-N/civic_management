@@ -1,0 +1,13 @@
+{
+  "name": "civic-project",
+  "version": "1.0.0",
+  "description": "Civic Issues Reporting & Transparency System",
+  "main": "index.js",
+  "scripts": {
+    "dev": "concurrently \"cd backend && node index.js\" \"cd client && npm run dev\"",
+    "install-all": "npm install && cd backend && npm install && cd ../client && npm install"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

@@ -1,0 +1,42 @@
+const mongoose = require('mongoose');
+
+const complaintSchema = new mongoose.Schema({
+  title: { type: String, required: true },
+  description: { type: String, required: true },
+  image: { type: String }, // URL or path
+  location: {
+    address: { type: String },
+    lat: { type: Number },
+    lng: { type: Number }
+  },
+  status: { 
+    type: String, 
+    enum: ['pending', 'in_progress', 'completed'], 
+    default: 'pending' 
+  },
+  priority: { 
+    type: String, 
+    enum: ['low', 'medium', 'high'], 
+    default: 'medium' 
+  },
+  created_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  department_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Department' },
+  assigned_worker_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  assigned_volunteer_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  sla_expiry: { type: Date },
+  timeline: [
+    {
+      status: String,
+      updated_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      timestamp: { type: Date, default: Date.now },
+      comments: String
+    }
+  ],
+  work_proof: {
+    before_image: String,
+    after_image: String,
+    completed_at: Date
+  }
+}, { timestamps: true });
+
+module.exports = mongoose.model('Complaint', complaintSchema);
