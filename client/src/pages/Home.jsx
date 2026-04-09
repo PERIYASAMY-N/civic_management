@@ -8,6 +8,7 @@ const Home = () => {
         <div className="nav-content">
           <h1>Civic<span>Hub</span></h1>
           <div className="nav-links">
+            <Link to="/public-dashboard" className="btn">Public Dashboard</Link>
             <Link to="/login" className="btn">Login</Link>
             <Link to="/register" className="btn btn-primary">Join Now</Link>
           </div>
@@ -20,7 +21,7 @@ const Home = () => {
           <p>The ultimate transparency platform bridging the gap between citizens and authorities.</p>
           <div className="hero-btns">
             <Link to="/register" className="btn btn-primary">Report an Issue</Link>
-            <Link to="/dashboard" className="btn">View Transparency Feed</Link>
+            <Link to="/public-dashboard" className="btn">View Public Dashboard</Link>
           </div>
         </div>
 

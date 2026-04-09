@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import api from '../api';
 import { Trophy, CheckCircle, MapPin } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 const VolunteerDashboard = ({ user }) => {
   const [tasks, setTasks] = useState([]);

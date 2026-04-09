@@ -2,7 +2,9 @@ const express = require('express');
 const router = express.Router();
 const Complaint = require('../models/Complaint');
 const Notification = require('../models/Notification');
+const User = require('../models/User');
 const { auth, authorize } = require('../middleware/auth');
+const { hasRole, hasStatus } = require('../utils/userAccess');
 
 // Create Complaint
 router.post('/', auth, async (req, res) => {
@@ -59,21 +61,61 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Assign Complaint (Dept Head Only)
+// Assign to Department (Admin Only)
+router.post('/assign-dept/:id', auth, authorize('admin'), async (req, res) => {
+  try {
+    const { department_id } = req.body;
+    const complaint = await Complaint.findById(req.params.id);
+    if (!complaint) return res.status(404).json({ message: 'Complaint not found' });
+
+    complaint.department_id = department_id;
+    complaint.status = 'assigned_to_dept';
+    complaint.timeline.push({
+      status: 'assigned_to_dept',
+      updated_by: req.user.id,
+      comments: 'Assigned to department'
+    });
+    await complaint.save();
+
+    res.json({ message: 'Complaint assigned to department', complaint });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Assign Complaint to Worker (Dept Head Only)
 router.post('/assign/:id', auth, authorize('head'), async (req, res) => {
   try {
     const { worker_id, volunteer_id, comments } = req.body;
     const complaint = await Complaint.findById(req.params.id);
     if (!complaint) return res.status(404).json({ message: 'Complaint not found' });
 
-    if (worker_id) complaint.assigned_worker_id = worker_id;
-    if (volunteer_id) complaint.assigned_volunteer_id = volunteer_id;
+    // If assigning a worker, ensure they are approved and in the department
+    if (worker_id) {
+      const worker = await User.findById(worker_id);
+      if (
+        !worker ||
+        !hasStatus(worker.status, 'approved') ||
+        worker.department_id.toString() !== req.user.department_id.toString()
+      ) {
+        return res.status(400).json({ message: 'Invalid or unapproved worker selection' });
+      }
+      complaint.assigned_worker_id = worker_id;
+    }
+
+    if (volunteer_id) {
+      const volunteer = await User.findById(volunteer_id);
+      if (!volunteer || !hasStatus(volunteer.status, 'approved')) {
+        return res.status(400).json({ message: 'Invalid or unapproved volunteer selection' });
+      }
+      complaint.assigned_volunteer_id = volunteer_id;
+    }
     
-    complaint.status = 'in_progress';
+    complaint.status = 'assigned_to_worker';
     complaint.timeline.push({
-      status: 'in_progress',
+      status: 'assigned_to_worker',
       updated_by: req.user.id,
-      comments: comments || 'Task assigned'
+      comments: comments || 'Task assigned to worker'
     });
 
     await complaint.save();
@@ -92,6 +134,31 @@ router.post('/assign/:id', auth, authorize('head'), async (req, res) => {
 
     res.json({ message: 'Task assigned successfully', complaint });
   } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// Start Work (Worker/Volunteer Only)
+router.post('/start-work/:id', auth, authorize('worker', 'volunteer'), async (req, res) => {
+  try {
+    const complaint = await Complaint.findById(req.params.id);
+    if (!complaint) return res.status(404).json({ message: 'Complaint not found' });
+
+    // Check if status is assigned_to_worker
+    if (complaint.status !== 'assigned_to_worker' && complaint.status !== 'assigned_to_dept') {
+       return res.status(400).json({ message: 'Status must be assigned to start work' });
+    }
+
+    complaint.status = 'in_progress';
+    complaint.timeline.push({
+      status: 'in_progress',
+      updated_by: req.user.id,
+      comments: 'Worker started work on the site'
+    });
+
+    await complaint.save();
+    res.json({ message: 'Work started', complaint });
+  } catch (err) {
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -100,6 +167,11 @@ router.post('/assign/:id', auth, authorize('head'), async (req, res) => {
 router.post('/update-status/:id', auth, authorize('worker', 'volunteer'), async (req, res) => {
   try {
     const { status, comments, before_image, after_image } = req.body;
+    
+    if (status === 'completed' && (!comments || comments.trim() === '')) {
+      return res.status(400).json({ message: 'Comments are mandatory for completion proof' });
+    }
+
     const complaint = await Complaint.findById(req.params.id);
     if (!complaint) return res.status(404).json({ message: 'Complaint not found' });
 
@@ -144,7 +216,7 @@ router.get('/dept-issues', auth, authorize('head'), async (req, res) => {
   try {
     const issues = await Complaint.find({ 
       department_id: req.user.department_id,
-      status: 'pending',
+      status: 'assigned_to_dept',
       assigned_worker_id: { $exists: false }
     }).sort({ createdAt: -1 });
     res.json(issues);
@@ -156,7 +228,7 @@ router.get('/dept-issues', auth, authorize('head'), async (req, res) => {
 // Get My Assigned Tasks
 router.get('/my-tasks', auth, authorize('worker', 'volunteer'), async (req, res) => {
   try {
-    const query = req.user.role === 'worker' 
+    const query = hasRole(req.user.role, 'worker')
       ? { assigned_worker_id: req.user.id } 
       : { assigned_volunteer_id: req.user.id };
     

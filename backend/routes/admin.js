@@ -3,11 +3,12 @@ const router = express.Router();
 const User = require('../models/User');
 const Department = require('../models/Department');
 const { auth, authorize } = require('../middleware/auth');
+const { getRoleValues, getStatusValues, hasRole } = require('../utils/userAccess');
 
 // Get Pending Users (Admin Only)
 router.get('/users/pending', auth, authorize('admin'), async (req, res) => {
   try {
-    const users = await User.find({ status: 'pending' }).select('-password');
+    const users = await User.find({ status: { $in: getStatusValues('pending') } }).select('-password');
     res.json(users);
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
@@ -15,12 +16,22 @@ router.get('/users/pending', auth, authorize('admin'), async (req, res) => {
 });
 
 // Approve User
-router.post('/users/approve/:id', auth, authorize('admin'), async (req, res) => {
+router.post('/users/approve/:id', auth, authorize('admin', 'head'), async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
-    user.status = 'approved';
+    // Security: Heads can only approve workers in their department
+    if (hasRole(req.user.role, 'head')) {
+      if (!hasRole(user.role, 'worker')) {
+        return res.status(403).json({ message: 'Heads can only approve Workers' });
+      }
+      if (user.department_id?.toString() !== req.user.department_id?.toString()) {
+        return res.status(403).json({ message: 'You can only approve users from your own department' });
+      }
+    }
+
+    user.status = 'APPROVED';
     await user.save();
     res.json({ message: 'User approved successfully', user });
   } catch (err) {
@@ -34,7 +45,17 @@ router.post('/users/reject/:id', auth, authorize('admin', 'head'), async (req, r
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
-    user.status = 'rejected';
+    // Security: Heads can only reject workers in their department
+    if (hasRole(req.user.role, 'head')) {
+      if (!hasRole(user.role, 'worker')) {
+        return res.status(403).json({ message: 'Heads can only reject Workers' });
+      }
+      if (user.department_id?.toString() !== req.user.department_id?.toString()) {
+        return res.status(403).json({ message: 'You can only reject users from your own department' });
+      }
+    }
+
+    user.status = 'REJECTED';
     await user.save();
     res.json({ message: 'User rejected' });
   } catch (err) {
@@ -59,6 +80,111 @@ router.post('/departments', auth, authorize('admin'), async (req, res) => {
     const dept = new Department({ name, department_id, head_id });
     await dept.save();
     res.status(201).json(dept);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// Get Department-wise Stats (Admin Only)
+router.get('/department-stats', auth, authorize('admin'), async (req, res) => {
+  try {
+    const workerRoles = getRoleValues('worker');
+
+    const stats = await Department.aggregate([
+      {
+        $lookup: {
+          from: 'users',
+          localField: '_id',
+          foreignField: 'department_id',
+          as: 'workers'
+        }
+      },
+      {
+        $lookup: {
+          from: 'complaints',
+          localField: '_id',
+          foreignField: 'department_id',
+          as: 'issues'
+        }
+      },
+      {
+        $project: {
+          department: "$name",
+          totalWorkers: { 
+            $size: { 
+              $filter: { input: "$workers", as: "w", cond: { $in: ["$$w.role", workerRoles] } } 
+            } 
+          },
+          totalIssues: { $size: "$issues" },
+          assigned: { 
+            $size: { 
+              $filter: { input: "$issues", as: "i", cond: { 
+                $in: ["$$i.status", ["assigned_to_dept", "assigned_to_worker"]] 
+              } } 
+            } 
+          },
+          inProgress: { 
+            $size: { 
+              $filter: { input: "$issues", as: "i", cond: { $eq: ["$$i.status", "in_progress"] } } 
+            } 
+          },
+          completed: { 
+            $size: { 
+              $filter: { input: "$issues", as: "i", cond: { $eq: ["$$i.status", "completed"] } } 
+            } 
+          },
+          incomplete: { 
+            $size: { 
+              $filter: { input: "$issues", as: "i", cond: { $ne: ["$$i.status", "completed"] } } 
+            } 
+          },
+          proofSubmitted: {
+            $size: {
+              $filter: { input: "$issues", as: "i", cond: { $not: { $eq: ["$$i.work_proof.completed_at", null] } } }
+            }
+          }
+        }
+      }
+    ]);
+    res.json(stats);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// Get Consolidated Dashboard Stats (Admin Only)
+router.get('/dashboard-stats', auth, authorize('admin'), async (req, res) => {
+  try {
+    const Complaint = require('../models/Complaint');
+    
+    const issueStats = await Complaint.aggregate([
+      { $group: { _id: "$status", count: { $sum: 1 } } }
+    ]);
+
+    const stats = {
+      pending: 0,
+      in_progress: 0,
+      completed: 0,
+      volunteers: 0,
+      pendingVolunteers: 0
+    };
+
+    issueStats.forEach(s => {
+      if (s._id === 'pending') stats.pending = s.count;
+      if (s._id === 'in_progress') stats.in_progress = s.count;
+      if (s._id === 'completed') stats.completed = s.count;
+    });
+
+    stats.volunteers = await User.countDocuments({
+      role: { $in: getRoleValues('volunteer') },
+      status: { $in: getStatusValues('approved') }
+    });
+    stats.pendingVolunteers = await User.countDocuments({
+      role: { $in: getRoleValues('volunteer') },
+      status: { $in: getStatusValues('pending') }
+    });
+
+    res.json(stats);
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }

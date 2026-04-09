@@ -13,18 +13,21 @@ const WorkerTasks = () => {
     fetchTasks();
   }, []);
 
-  const fetchTasks = async () => {
+  const handleStartWork = async (taskId) => {
     try {
-      const res = await api.get('/complaints/my-tasks');
-      setTasks(res.data);
+      await api.post(`/complaints/start-work/${taskId}`);
+      alert('Work started successfully');
+      fetchTasks();
     } catch {
-      console.error('Error fetching tasks');
-    } finally {
-      setLoading(false);
+      alert('Failed to start work');
     }
   };
 
   const handleUpdateStatus = async (taskId, status, data = {}) => {
+    if (status === 'completed' && (!data.comments || data.comments.trim() === '')) {
+      alert('Comments are mandatory for completion proof');
+      return;
+    }
     try {
       await api.post(`/complaints/update-status/${taskId}`, {
         status,
@@ -40,31 +43,45 @@ const WorkerTasks = () => {
 
   if (loading) return <div>Loading tasks...</div>;
 
+  const getStatusBadge = (status) => {
+    const labels = {
+      'assigned_to_worker': 'New Assignment',
+      'in_progress': 'In Progress',
+      'completed': 'Completed',
+      'assigned_to_dept': 'Dept Assigned'
+    };
+    return <span className={`status-badge ${status}`}>{labels[status] || status}</span>;
+  };
+
   return (
     <div className="fade-in">
-      <h2 style={{ marginBottom: '2rem' }}>Assigned Tasks</h2>
+      <h2 style={{ marginBottom: '2rem' }}>My Assigned Tasks</h2>
       {tasks.length === 0 ? (
         <div className="glass" style={{ padding: '2rem', textAlign: 'center' }}>
           <p>No tasks assigned to you yet.</p>
         </div>
       ) : (
-        <div className="tasks-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '2rem' }}>
+        <div className="tasks-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '2rem' }}>
           {tasks.map(task => (
-            <div key={task._id} className="glass" style={{ padding: '1.5rem', borderRadius: 'var(--radius)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
-                <span className={`status-badge ${task.status}`}>{task.status}</span>
+            <div key={task._id} className="glass" style={{ padding: '1.5rem', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem', alignItems: 'center' }}>
+                {getStatusBadge(task.status)}
                 <span className={`priority-tag ${task.priority}`}>{task.priority}</span>
               </div>
-              <h3>{task.title}</h3>
-              <p style={{ color: 'var(--text-muted)', margin: '0.5rem 0 1.5rem' }}><MapPin size={14} /> {task.location.address}</p>
-              <div style={{ display: 'flex', gap: '1rem' }}>
-                {task.status === 'pending' && (
-                  <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => handleUpdateStatus(task._id, 'in_progress')}>Start Task</button>
+              <h3 style={{ marginBottom: '0.5rem' }}>{task.title}</h3>
+              <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem', fontSize: '0.9rem' }}><MapPin size={14} /> {task.location.address}</p>
+              
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                {task.status === 'assigned_to_worker' && (
+                  <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => handleStartWork(task._id)}>Start Work</button>
                 )}
                 {task.status === 'in_progress' && (
                   <button className="btn btn-success" style={{ flex: 1, backgroundColor: 'var(--success)', color: 'white' }} onClick={() => setCompletingTask(task)}>Submit Proof</button>
                 )}
-                <Link to={`/dashboard/complaint/${task._id}`} className="btn" style={{ flex: 1, textAlign: 'center' }}>Details</Link>
+                {task.status === 'completed' && (
+                  <button className="btn" style={{ flex: 1 }} disabled>Resolved</button>
+                )}
+                <Link to={`/dashboard/complaint/${task._id}`} className="btn" style={{ flex: 1, textAlign: 'center', border: '1px solid var(--border)' }}>Details</Link>
               </div>
             </div>
           ))}
@@ -74,34 +91,36 @@ const WorkerTasks = () => {
       {completingTask && (
         <div className="modal-overlay">
           <div className="modal glass fade-in">
-            <h3>Complete Task: {completingTask.title}</h3>
-            <div className="input-group" style={{ marginTop: '1.5rem' }}>
-              <label>Resolution Summary</label>
+            <h3 style={{ color: 'var(--primary)', marginBottom: '0.5rem' }}>Complete Task</h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>{completingTask.title}</p>
+            
+            <div className="input-group">
+              <label>Resolution Summary <span style={{ color: 'var(--danger)' }}>*</span></label>
               <textarea 
-                placeholder="Describe what was done..." 
+                placeholder="Submit your completion report here..." 
                 onChange={(e) => setProof({...proof, comments: e.target.value})}
-                style={{ width: '100%', minHeight: '100px', backgroundColor: 'var(--bg-main)', border: '1px solid var(--border)', borderRadius: '8px', padding: '1rem', color: 'var(--text-main)' }}
+                style={{ width: '100%', minHeight: '120px', backgroundColor: 'var(--bg-main)', border: '1px solid var(--border)', borderRadius: '8px', padding: '1rem', color: 'var(--text-main)', fontSize: '0.95rem' }}
               />
             </div>
             <div className="input-group">
-              <label>Proof Image URL (After)</label>
+              <label>After Image URL (Optional)</label>
               <div style={{ display: 'flex', gap: '1rem' }}>
                 <input 
                   type="text" 
-                  placeholder="https://..." 
+                  placeholder="https://image-hosting.com/proof.jpg" 
                   onChange={(e) => setProof({...proof, after_image: e.target.value})}
                 />
-                <button className="btn"><Camera size={18} /></button>
+                <button className="btn btn-outline" title="Upload Image"><Camera size={18} /></button>
               </div>
             </div>
-            <div className="btn-group" style={{ marginTop: '2rem', display: 'flex', gap: '1rem' }}>
-              <button className="btn" onClick={() => setCompletingTask(null)} style={{ flex: 1 }}>Cancel</button>
+            <div className="btn-group" style={{ marginTop: '2.5rem', display: 'flex', gap: '1rem' }}>
+              <button className="btn btn-outline" onClick={() => setCompletingTask(null)} style={{ flex: 1 }}>Cancel</button>
               <button 
                 className="btn btn-primary" 
                 style={{ flex: 1 }}
                 onClick={() => handleUpdateStatus(completingTask._id, 'completed', proof)}
               >
-                Submit & Close
+                Submit Resolution
               </button>
             </div>
           </div>

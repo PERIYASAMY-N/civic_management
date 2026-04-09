@@ -11,7 +11,7 @@ const complaintSchema = new mongoose.Schema({
   },
   status: { 
     type: String, 
-    enum: ['pending', 'in_progress', 'completed'], 
+    enum: ['pending', 'assigned_to_dept', 'assigned_to_worker', 'in_progress', 'completed'], 
     default: 'pending' 
   },
   priority: { 

@@ -1,6 +1,6 @@
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
-import { Moon, Sun } from 'lucide-react';
+import { Moon, Sun, Search, Bell } from 'lucide-react';
 import { useState } from 'react';
 import DashboardHome from '../pages/DashboardHome';
 import AllIssues from '../pages/AllIssues';
@@ -14,6 +14,7 @@ import Settings from '../pages/Settings';
 import Notifications from '../pages/Notifications';
 import ComplaintDetails from '../pages/ComplaintDetails';
 import './Dashboard.css';
+import { getRoleLabel } from '../utils/userAccess';
 
 const DashboardLayout = ({ user, setUser }) => {
   const navigate = useNavigate();
@@ -36,22 +37,34 @@ const DashboardLayout = ({ user, setUser }) => {
     <div className="dashboard-container">
       <Sidebar user={user} onLogout={handleLogout} />
       <main className="dashboard-content">
-        <header className="glass">
+        <header className="glass global-header">
           <div className="header-left">
-            <h2>Welcome, {user.name}</h2>
-            <span className="role-badge">{user.role}</span>
+            <div className="search-wrapper">
+              <Search size={18} />
+              <input type="text" placeholder="Search complaints..." />
+            </div>
           </div>
-          <div className="header-right" style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-            <button className="btn" onClick={toggleDarkMode} style={{ padding: '0.5rem' }}>
+          <div className="header-right">
+            <div className="notification-center">
+              <Bell size={20} />
+              <span className="badge-count">3</span>
+            </div>
+            <div className="user-profile">
+               <div className="user-info">
+                  <span className="user-name">{user.name}</span>
+                  <span className="user-role">{getRoleLabel(user.role)}</span>
+               </div>
+               <div className="user-avatar">{user.name[0]}</div>
+            </div>
+            <button className="theme-toggle" onClick={toggleDarkMode}>
               {isDark ? <Sun size={20} /> : <Moon size={20} />}
             </button>
-            <div className="user-avatar">{user.name[0]}</div>
           </div>
         </header>
         <div className="content-area">
           <Routes>
             <Route path="/" element={<DashboardHome user={user} />} />
-            <Route path="/all-issues" element={<AllIssues />} />
+            <Route path="/all-issues" element={<AllIssues user={user} />} />
             <Route path="/report" element={<ReportIssue user={user} />} />
             <Route path="/analytics" element={<Analytics />} />
             <Route path="/tasks" element={<WorkerTasks />} />

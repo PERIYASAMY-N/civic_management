@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import api from '../api';
 import './Auth.css';
+import { hasRole, normalizeUser } from '../utils/userAccess';
 
 const Login = ({ setUser }) => {
   const [formData, setFormData] = useState({ email: '', password: '' });
@@ -15,10 +16,15 @@ const Login = ({ setUser }) => {
     setError('');
     try {
       const res = await api.post('/auth/login', formData);
+      const user = normalizeUser(res.data.user);
       localStorage.setItem('token', res.data.token);
-      localStorage.setItem('user', JSON.stringify(res.data.user));
-      setUser(res.data.user);
-      navigate('/dashboard');
+      localStorage.setItem('user', JSON.stringify(user));
+      setUser(user);
+      if (hasRole(user.role, 'admin')) {
+        navigate('/dashboard/approvals');
+      } else {
+        navigate('/dashboard');
+      }
     } catch (err) {
       setError(err.response?.data?.message || 'Login failed');
     } finally {

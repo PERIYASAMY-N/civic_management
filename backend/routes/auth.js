@@ -7,6 +7,14 @@ const multer = require('multer');
 const path = require('path');
 const { generateOTP, sendOTP } = require('../utils/otp');
 const { auth, authorize } = require('../middleware/auth');
+const {
+  getRoleValues,
+  getStatusValues,
+  hasRole,
+  hasStatus,
+  normalizeRole,
+  normalizeUserForClient
+} = require('../utils/userAccess');
 
 // Multer Storage Configuration
 const storage = multer.diskStorage({
@@ -37,13 +45,14 @@ const upload = multer({
 router.post('/register', upload.single('government_id_proof'), async (req, res) => {
   try {
     const { name, email, password, role, department_id, employee_id, government_id } = req.body;
+    const normalizedRole = normalizeRole(role);
     
     // Check if user exists
     let user = await User.findOne({ email });
     if (user) return res.status(400).json({ message: 'User already exists' });
 
     // Validation for Volunteer role
-    if (role === 'volunteer' && !req.file) {
+    if (hasRole(normalizedRole, 'volunteer') && !req.file) {
       return res.status(400).json({ message: 'Government ID proof photo is required for Volunteers' });
     }
 
@@ -55,8 +64,8 @@ router.post('/register', upload.single('government_id_proof'), async (req, res) 
       name,
       email,
       password,
-      role,
-      status: 'approved', // Default approved for now
+      role: normalizedRole,
+      status: hasRole(normalizedRole, ['worker', 'volunteer', 'head']) ? 'PENDING' : 'APPROVED',
       otp,
       otpExpiry
     };
@@ -87,7 +96,13 @@ router.post('/register', upload.single('government_id_proof'), async (req, res) 
 
     res.status(201).json({ 
       message: 'Registration successful. Please verify your email with the OTP sent.',
-      user: { id: user._id, name: user.name, email: user.email, role: user.role, status: user.status }
+      user: normalizeUserForClient({
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        status: user.status
+      })
     });
   } catch (err) {
     console.error(`[REGISTRATION ERROR] ${new Date().toISOString()}:`, err);
@@ -113,11 +128,11 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    if (user.status === 'pending') {
+    if (hasStatus(user.status, 'pending')) {
       return res.status(403).json({ message: 'Your account is pending approval' });
     }
 
-    if (user.status === 'rejected') {
+    if (hasStatus(user.status, 'rejected')) {
       return res.status(403).json({ message: 'Your account application was rejected' });
     }
 
@@ -157,7 +172,13 @@ router.post('/login', async (req, res) => {
     res.json({
       token,
       refreshToken,
-      user: { id: user._id, name: user.name, email: user.email, role: user.role }
+      user: normalizeUserForClient({
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        status: user.status
+      })
     });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
@@ -257,10 +278,41 @@ router.get('/staff', auth, authorize('head'), async (req, res) => {
   try {
     const staff = await User.find({
       department_id: req.user.department_id,
-      role: { $in: ['worker', 'volunteer'] },
-      status: 'approved'
+      role: { $in: getRoleValues(['worker', 'volunteer']) },
+      status: { $in: getStatusValues('approved') }
     }).select('name email role');
-    res.json(staff);
+    res.json(staff.map((user) => normalizeUserForClient(user.toObject())));
+  } catch (err) {
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Get Pending Staff for Dept Head (Workers) / Admin (Volunteers)
+router.get('/pending-staff', auth, authorize('admin', 'head'), async (req, res) => {
+  try {
+    const query = hasRole(req.user.role, 'admin')
+      ? {
+          role: { $in: getRoleValues(['head', 'volunteer']) },
+          status: { $in: getStatusValues('pending') }
+        }
+      : {
+          role: { $in: getRoleValues('worker') },
+          status: { $in: getStatusValues('pending') },
+          department_id: req.user.department_id
+        };
+    
+    const staff = await User.find(query)
+      .select('name email role status department_id employee_id government_id')
+      .populate('department_id', 'name');
+    res.json(
+      staff.map((user) => {
+        const normalizedUser = normalizeUserForClient(user.toObject());
+        return {
+          ...normalizedUser,
+          department: normalizedUser.department_id || null
+        };
+      })
+    );
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
   }

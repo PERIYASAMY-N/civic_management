@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { 
+  Globe2,
   LayoutDashboard, 
   MapPin, 
   FileText, 
@@ -12,6 +13,7 @@ import {
 } from 'lucide-react';
 
 import { useNotification } from '../context/NotificationContext';
+import { hasRole } from '../utils/userAccess';
 
 const Sidebar = ({ user, onLogout }) => {
   const { persistentNotifications } = useNotification();
@@ -20,6 +22,7 @@ const Sidebar = ({ user, onLogout }) => {
 
   const menuItems = [
     { name: 'Dashboard', icon: LayoutDashboard, path: '/dashboard', roles: ['public', 'admin', 'head', 'worker', 'volunteer'] },
+    { name: 'Public Dashboard', icon: Globe2, path: '/public-dashboard', roles: ['public', 'admin', 'head', 'worker', 'volunteer'] },
     { name: 'All Issues', icon: MapPin, path: '/dashboard/all-issues', roles: ['public', 'admin', 'head', 'worker', 'volunteer'] },
     { name: 'Report Issue', icon: FileText, path: '/dashboard/report', roles: ['public'] },
     { name: 'Dept Management', icon: Users, path: '/dashboard/head', roles: ['head'] },
@@ -38,7 +41,7 @@ const Sidebar = ({ user, onLogout }) => {
       </div>
       
       <nav className="sidebar-nav">
-        {menuItems.filter(item => item.roles.includes(role)).map((item) => (
+        {menuItems.filter(item => hasRole(role, item.roles)).map((item) => (
           <Link 
             key={item.path} 
             to={item.path} 

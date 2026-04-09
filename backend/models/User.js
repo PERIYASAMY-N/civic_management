@@ -7,12 +7,12 @@ const userSchema = new mongoose.Schema({
   password: { type: String, required: true },
   role: { 
     type: String, 
-    enum: ['public', 'admin', 'head', 'worker', 'volunteer'], 
+    enum: ['public', 'admin', 'head', 'worker', 'volunteer', 'PUBLIC', 'ADMIN', 'DEPT_HEAD', 'WORKER', 'VOLUNTEER'], 
     default: 'public' 
   },
   status: { 
     type: String, 
-    enum: ['pending', 'approved', 'rejected'], 
+    enum: ['pending', 'approved', 'rejected', 'PENDING', 'APPROVED', 'REJECTED'], 
     default: 'approved' // Default approved for public, admin
   },
   department_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Department' }, // For Heads and Workers
