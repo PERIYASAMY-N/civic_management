@@ -7,7 +7,7 @@ const { auth } = require('../middleware/auth');
 router.get('/', auth, async (req, res) => {
   try {
     const notifications = await Notification.find({ user_id: req.user.id })
-      .sort({ createdAt: -1 })
+      .sort({ read: 1, createdAt: -1 })
       .limit(20);
     res.json(notifications);
   } catch (err) {
@@ -20,7 +20,11 @@ router.put('/:id/read', auth, async (req, res) => {
   try {
     const notification = await Notification.findOneAndUpdate(
       { _id: req.params.id, user_id: req.user.id },
-      { read: true },
+      {
+        read: true,
+        status: 'read',
+        read_at: new Date()
+      },
       { new: true }
     );
     res.json(notification);

@@ -3,6 +3,7 @@ import {
   Activity,
   Award,
   BarChart3,
+  BellRing,
   Building2,
   CheckCircle2,
   LoaderCircle,
@@ -22,6 +23,7 @@ import {
   YAxis
 } from 'recharts';
 import api from '../api';
+import { useNotification } from '../context/NotificationContext';
 
 const PERFORMANCE_COLORS = {
   high: '#16a34a',
@@ -37,6 +39,18 @@ const getPerformanceBand = (value) => {
 
 const getPerformanceColor = (value) => PERFORMANCE_COLORS[getPerformanceBand(value)];
 
+const getNotificationAccent = (type) => {
+  const normalizedType = String(type || '').toUpperCase();
+  if (normalizedType === 'SUCCESS') return '#16a34a';
+  if (normalizedType === 'ASSIGNMENT') return '#0ea5e9';
+  return '#0f766e';
+};
+
+const getNotificationTitle = (notification) => (
+  notification.title
+  || (String(notification.type || '').toUpperCase() === 'SUCCESS' ? 'Issue resolved' : 'Issue update')
+);
+
 const PublicDashboard = () => {
   const [overview, setOverview] = useState(null);
   const [departments, setDepartments] = useState([]);
@@ -44,6 +58,8 @@ const PublicDashboard = () => {
   const [topWorkers, setTopWorkers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const { persistentNotifications, markAsRead, unreadCount } = useNotification();
+  const hasAuthenticatedUser = Boolean(localStorage.getItem('token'));
 
   useEffect(() => {
     const fetchDashboard = async () => {
@@ -145,6 +161,55 @@ const PublicDashboard = () => {
               accent={getPerformanceColor(overview?.performance ?? 0)}
             />
           </section>
+
+          {hasAuthenticatedUser ? (
+            <section className="public-section">
+              <div className="panel-card notification-panel">
+                <div className="section-heading">
+                  <div>
+                    <span className="section-kicker">Notifications</span>
+                    <h2>Public User Updates</h2>
+                  </div>
+                  <span className="spotlight-chip">
+                    <BellRing size={14} />
+                    {unreadCount} unread
+                  </span>
+                </div>
+
+                {persistentNotifications.length ? (
+                  <div className="notification-feed">
+                    {persistentNotifications.slice(0, 5).map((notification) => (
+                      <div key={notification._id} className="public-notification-row">
+                        <div
+                          className="public-notification-icon"
+                          style={{
+                            background: `${getNotificationAccent(notification.type)}16`,
+                            color: getNotificationAccent(notification.type)
+                          }}
+                        >
+                          <BellRing size={18} />
+                        </div>
+                        <div className="public-notification-copy">
+                          <strong>{getNotificationTitle(notification)}</strong>
+                          <p>{notification.message}</p>
+                          <span>{new Date(notification.createdAt).toLocaleString()}</span>
+                        </div>
+                        <button className="btn btn-primary" onClick={() => markAsRead(notification._id)}>
+                          Mark Read
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyState
+                    icon={BellRing}
+                    title="No new user notifications"
+                    description="Updates such as worker assigned, in progress, and issue resolved will appear here."
+                  />
+                )}
+              </div>
+            </section>
+          ) : null}
 
           <section className="public-section two-column">
             <div className="panel-card">
@@ -583,6 +648,51 @@ const DashboardStyles = () => (
       gap: 0.85rem;
     }
 
+    .notification-panel {
+      padding-bottom: 1rem;
+    }
+
+    .notification-feed {
+      display: grid;
+      gap: 0.85rem;
+    }
+
+    .public-notification-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 1rem;
+      align-items: center;
+      padding: 1rem;
+      border-radius: 18px;
+      border: 1px solid #dbe7e1;
+      background: #fbfffd;
+    }
+
+    .public-notification-icon {
+      width: 2.8rem;
+      height: 2.8rem;
+      border-radius: 16px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .public-notification-copy strong {
+      display: block;
+      color: #173329;
+      margin-bottom: 0.25rem;
+    }
+
+    .public-notification-copy p {
+      color: #476156;
+      margin-bottom: 0.35rem;
+    }
+
+    .public-notification-copy span {
+      color: #587265;
+      font-size: 0.85rem;
+    }
+
     .rank-card,
     .leaderboard-row {
       border-radius: 18px;
@@ -837,6 +947,10 @@ const DashboardStyles = () => (
       .section-heading {
         flex-direction: column;
         align-items: flex-start;
+      }
+
+      .public-notification-row {
+        grid-template-columns: 1fr;
       }
 
       .leaderboard-metric {

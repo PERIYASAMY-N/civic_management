@@ -9,10 +9,12 @@ const authRoutes = require('./routes/auth');
 const app = express();
 
 // Ensure upload directories exist
-const uploadDir = path.join(__dirname, 'uploads', 'id-proofs');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
+['id-proofs', 'issues', 'proofs', 'profile'].forEach((directory) => {
+  const uploadDir = path.join(__dirname, 'uploads', directory);
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+});
 
 // Middleware
 app.use(express.json());
@@ -34,6 +36,8 @@ app.use((req, res, next) => {
 
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/user', require('./routes/user'));
+app.use('/api/departments', require('./routes/departments'));
 app.use('/api/complaints', require('./routes/complaints'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/notifications', require('./routes/notifications'));

@@ -81,7 +81,7 @@ const WorkerTasks = () => {
                 {task.status === 'completed' && (
                   <button className="btn" style={{ flex: 1 }} disabled>Resolved</button>
                 )}
-                <Link to={`/dashboard/complaint/${task._id}`} className="btn" style={{ flex: 1, textAlign: 'center', border: '1px solid var(--border)' }}>Details</Link>
+                <Link to={`/issues/${task._id}`} className="btn" style={{ flex: 1, textAlign: 'center', border: '1px solid var(--border)' }}>Details</Link>
               </div>
             </div>
           ))}

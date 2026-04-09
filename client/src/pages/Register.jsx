@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import api from '../api';
 import './Auth.css';
@@ -12,15 +12,34 @@ const Register = () => {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [departmentsLoading, setDepartmentsLoading] = useState(false);
+  const [departments, setDepartments] = useState([]);
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
-  const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+  useEffect(() => {
+    const fetchDepartments = async () => {
+      try {
+        setDepartmentsLoading(true);
+        const response = await api.get('/departments/active');
+        setDepartments(Array.isArray(response.data) ? response.data : []);
+      } catch (fetchError) {
+        console.error('Failed to load active departments', fetchError);
+      } finally {
+        setDepartmentsLoading(false);
+      }
+    };
+
+    void fetchDepartments();
+  }, []);
+
+  const handleChange = (event) => {
+    const { name, value } = event.target;
+    setFormData((current) => ({ ...current, [name]: value }));
   };
 
-  const handleFileChange = (e) => {
-    const selectedFile = e.target.files[0];
+  const handleFileChange = (event) => {
+    const selectedFile = event.target.files[0];
     if (selectedFile) {
       if (selectedFile.size > 2 * 1024 * 1024) {
         setError('File size must be less than 2MB');
@@ -45,15 +64,20 @@ const Register = () => {
     setPreview(null);
   };
 
-  const nextStep = () => setStep(step + 1);
-  const prevStep = () => setStep(step - 1);
+  const nextStep = () => setStep((current) => current + 1);
+  const prevStep = () => setStep((current) => current - 1);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit = async (event) => {
+    event.preventDefault();
     setLoading(true);
     setError('');
 
-    // Validation for Volunteer
+    if (['head', 'worker'].includes(formData.role) && !formData.department_id) {
+      setError('Please select an active department');
+      setLoading(false);
+      return;
+    }
+
     if (formData.role === 'volunteer' && !file) {
       setError('Please upload ID proof photo');
       setLoading(false);
@@ -61,9 +85,10 @@ const Register = () => {
     }
 
     const data = new FormData();
-    Object.keys(formData).forEach(key => {
+    Object.keys(formData).forEach((key) => {
       data.append(key, formData[key]);
     });
+
     if (file) {
       data.append('government_id_proof', file);
     }
@@ -92,7 +117,7 @@ const Register = () => {
         </div>
 
         <form onSubmit={handleSubmit}>
-          {step === 1 && (
+          {step === 1 ? (
             <div className="fade-in">
               <h3>Step 1: Account Info</h3>
               <input name="name" placeholder="Full Name" onChange={handleChange} required />
@@ -100,9 +125,9 @@ const Register = () => {
               <input name="password" type="password" placeholder="Password" onChange={handleChange} required />
               <button type="button" className="btn btn-primary" onClick={nextStep}>Next</button>
             </div>
-          )}
+          ) : null}
 
-          {step === 2 && (
+          {step === 2 ? (
             <div className="fade-in">
               <h3>Step 2: Choose Role</h3>
               <select name="role" onChange={handleChange} value={formData.role}>
@@ -116,40 +141,60 @@ const Register = () => {
                 <button type="button" className="btn btn-primary" onClick={nextStep}>Next</button>
               </div>
             </div>
-          )}
+          ) : null}
 
-          {step === 3 && (
+          {step === 3 ? (
             <div className="fade-in">
               <h3>Step 3: Verification</h3>
-              {formData.role === 'head' && (
+              {formData.role === 'head' ? (
                 <div className="input-group">
-                  <label>Department Code</label>
-                  <input name="department_id" placeholder="e.g., WATE-0411 or PW-202" onChange={handleChange} required />
-                  <p className="hint">Ask your system admin for your department's code.</p>
+                  <label>Department</label>
+                  <select name="department_id" value={formData.department_id} onChange={handleChange} required>
+                    <option value="">Select an active department</option>
+                    {departments.map((department) => (
+                      <option key={department._id} value={department.department_id}>
+                        {department.name} ({department.department_id}) - {department.activeUsers} users
+                      </option>
+                    ))}
+                  </select>
+                  <p className="hint">
+                    {departmentsLoading ? 'Loading active departments...' : 'Only departments with registered users are shown.'}
+                  </p>
                 </div>
-              )}
-              {formData.role === 'worker' && (
+              ) : null}
+
+              {formData.role === 'worker' ? (
                 <div className="input-group">
                   <label>Service Credentials</label>
                   <input name="employee_id" placeholder="Employee / Service ID" onChange={handleChange} required />
-                  <input name="department_id" placeholder="Department Code (e.g., PW-202)" onChange={handleChange} required />
+                  <select name="department_id" value={formData.department_id} onChange={handleChange} required>
+                    <option value="">Select an active department</option>
+                    {departments.map((department) => (
+                      <option key={department._id} value={department.department_id}>
+                        {department.name} ({department.department_id}) - {department.activeUsers} users
+                      </option>
+                    ))}
+                  </select>
+                  <p className="hint">
+                    {departmentsLoading ? 'Loading active departments...' : 'Only active departments are available for staff registration.'}
+                  </p>
                 </div>
-              )}
-              {formData.role === 'volunteer' && (
+              ) : null}
+
+              {formData.role === 'volunteer' ? (
                 <input name="government_id" placeholder="Aadhaar / Voter ID" onChange={handleChange} required />
-              )}
-              
-              {/* Common File Upload for Head, Worker, Volunteer (Mandatory for Volunteer) */}
-              {formData.role !== 'public' && (
+              ) : null}
+
+              {formData.role !== 'public' ? (
                 <div className="file-upload-container">
-                  <p style={{marginBottom: '10px', fontSize: '0.9rem', fontWeight: '500'}}>
+                  <p style={{ marginBottom: '10px', fontSize: '0.9rem', fontWeight: '500' }}>
                     Upload Government ID Proof {formData.role === 'volunteer' ? '*' : '(Optional)'}
                   </p>
                   {!preview ? (
                     <div className="file-input-wrapper">
-                      <button type="button" className="btn btn-outline" style={{width: '100%'}}>Choose Image</button>
+                      <button type="button" className="btn btn-outline" style={{ width: '100%' }}>Choose Image</button>
                       <input type="file" accept="image/*" onChange={handleFileChange} />
-                      <p className="hint" style={{marginTop: '10px'}}>Max 2MB: JPG, JPEG, PNG</p>
+                      <p className="hint" style={{ marginTop: '10px' }}>Max 2MB: JPG, JPEG, PNG</p>
                     </div>
                   ) : (
                     <div className="file-info">
@@ -159,22 +204,22 @@ const Register = () => {
                     </div>
                   )}
                 </div>
-              )}
+              ) : null}
 
-              {formData.role === 'public' && (
+              {formData.role === 'public' ? (
                 <p>Public users don't need additional verification. You're all set!</p>
-              )}
-              
+              ) : null}
+
               <div className="btn-group">
                 <button type="button" className="btn" onClick={prevStep}>Back</button>
-                <button type="submit" className="btn btn-primary" disabled={loading}>
+                <button type="submit" className="btn btn-primary" disabled={loading || departmentsLoading}>
                   {loading ? 'Registering...' : 'Complete Registration'}
                 </button>
               </div>
             </div>
-          )}
+          ) : null}
         </form>
-        {error && <p className="error">{error}</p>}
+        {error ? <p className="error">{error}</p> : null}
         <p className="auth-footer">Already have an account? <Link to="/login">Login</Link></p>
       </div>
     </div>

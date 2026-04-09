@@ -2,7 +2,23 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import api from '../api';
 import './Auth.css';
-import { hasRole, normalizeUser } from '../utils/userAccess';
+import { normalizeRole, normalizeUser } from '../utils/userAccess';
+
+const getPostLoginRoute = (role) => {
+  switch (normalizeRole(role)) {
+    case 'ADMIN':
+      return '/issues';
+    case 'DEPT_HEAD':
+      return '/assigned-tasks';
+    case 'WORKER':
+      return '/tasks';
+    case 'VOLUNTEER':
+      return '/volunteer';
+    case 'PUBLIC':
+    default:
+      return '/public-dashboard';
+  }
+};
 
 const Login = ({ setUser }) => {
   const [formData, setFormData] = useState({ email: '', password: '' });
@@ -20,11 +36,7 @@ const Login = ({ setUser }) => {
       localStorage.setItem('token', res.data.token);
       localStorage.setItem('user', JSON.stringify(user));
       setUser(user);
-      if (hasRole(user.role, 'admin')) {
-        navigate('/dashboard/approvals');
-      } else {
-        navigate('/dashboard');
-      }
+      navigate(getPostLoginRoute(user.role));
     } catch (err) {
       setError(err.response?.data?.message || 'Login failed');
     } finally {

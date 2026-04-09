@@ -5,6 +5,7 @@ const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
+  phone: { type: String },
   role: { 
     type: String, 
     enum: ['public', 'admin', 'head', 'worker', 'volunteer', 'PUBLIC', 'ADMIN', 'DEPT_HEAD', 'WORKER', 'VOLUNTEER'], 
@@ -26,7 +27,13 @@ const userSchema = new mongoose.Schema({
   twoFactorEnabled: { type: Boolean, default: false },
   failedLoginAttempts: { type: Number, default: 0 },
   lockUntil: { type: Date },
-  refreshToken: { type: String }
+  refreshToken: { type: String },
+  profile_image: { type: String },
+  notification_preferences: {
+    issue_updates: { type: Boolean, default: true },
+    assignment_alerts: { type: Boolean, default: true },
+    completion_alerts: { type: Boolean, default: true }
+  }
 }, { timestamps: true });
 
 // Hash password before saving

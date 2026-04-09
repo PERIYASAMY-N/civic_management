@@ -4,6 +4,9 @@ const complaintSchema = new mongoose.Schema({
   title: { type: String, required: true },
   description: { type: String, required: true },
   image: { type: String }, // URL or path
+  address: { type: String },
+  lat: { type: Number },
+  lng: { type: Number },
   location: {
     address: { type: String },
     lat: { type: Number },
@@ -36,6 +39,14 @@ const complaintSchema = new mongoose.Schema({
     before_image: String,
     after_image: String,
     completed_at: Date
+  },
+  image_context: {
+    source: { type: String },
+    captured_at: { type: Date },
+    address: { type: String },
+    lat: { type: Number },
+    lng: { type: Number },
+    overlay_label: { type: String }
   }
 }, { timestamps: true });
 

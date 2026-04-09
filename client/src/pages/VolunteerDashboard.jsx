@@ -42,7 +42,7 @@ const VolunteerDashboard = ({ user }) => {
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <span style={{ display: 'block', fontWeight: 700, color: 'var(--success)' }}>+10 Pts</span>
-                  <Link to={`/dashboard/complaint/${task._id}`} className="btn" style={{ padding: '0.4rem 1rem', fontSize: '0.8rem', marginTop: '0.5rem', display: 'inline-block' }}>Details</Link>
+                  <Link to={`/issues/${task._id}`} className="btn" style={{ padding: '0.4rem 1rem', fontSize: '0.8rem', marginTop: '0.5rem', display: 'inline-block' }}>Details</Link>
                 </div>
               </div>
             ))}

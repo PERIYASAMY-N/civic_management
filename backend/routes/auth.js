@@ -118,7 +118,7 @@ router.post('/register', upload.single('government_id_proof'), async (req, res) 
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email }).populate('department_id', 'name department_id');
     if (!user) return res.status(400).json({ message: 'Invalid credentials' });
 
     // Check if account is locked
@@ -177,7 +177,11 @@ router.post('/login', async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
-        status: user.status
+        status: user.status,
+        phone: user.phone,
+        department_id: user.department_id,
+        profile_image: user.profile_image,
+        notification_preferences: user.notification_preferences
       })
     });
   } catch (err) {

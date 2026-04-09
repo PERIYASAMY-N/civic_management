@@ -1,7 +1,16 @@
 import { useState, useEffect } from 'react';
 import api from '../api';
 import { useParams } from 'react-router-dom';
-import { Clock, CheckCircle, AlertCircle, MapPin, User, Calendar } from 'lucide-react';
+import { MapPin, User, Calendar } from 'lucide-react';
+import { resolveApiAssetUrl } from '../api';
+
+const getIssueAddress = (issue) => (
+  issue?.address
+  || issue?.location?.address
+  || (Number.isFinite(issue?.lat) && Number.isFinite(issue?.lng)
+    ? `Lat ${issue.lat.toFixed(5)}, Lng ${issue.lng.toFixed(5)}`
+    : 'Location unavailable')
+);
 
 const ComplaintDetails = () => {
   const { id } = useParams();
@@ -33,8 +42,8 @@ const ComplaintDetails = () => {
             <span className={`status-badge ${issue.status}`}>{issue.status}</span>
             <h2 style={{ fontSize: '2.5rem', margin: '1rem 0' }}>{issue.title}</h2>
             <div className="meta-row">
-              <span className="meta-item"><MapPin size={18} /> {issue.location.address}</span>
-              <span className="meta-item"><Calendar size={18} /> {new Date(issue.created_at).toLocaleDateString()}</span>
+              <span className="meta-item"><MapPin size={18} /> {getIssueAddress(issue)}</span>
+              <span className="meta-item"><Calendar size={18} /> {new Date(issue.createdAt || issue.created_at).toLocaleDateString()}</span>
               <span className="meta-item"><User size={18} /> Reported by {issue.created_by.name}</span>
             </div>
           </div>
@@ -73,14 +82,37 @@ const ComplaintDetails = () => {
 
         <div className="sidebar-info">
           <div className="glass section" style={{ padding: '2rem', marginBottom: '2rem' }}>
+            <h3>Reported Issue Photo</h3>
+            {issue.image ? (
+              <div style={{ marginTop: '1rem' }}>
+                <img src={resolveApiAssetUrl(issue.image)} alt="Reported issue" style={{ width: '100%', borderRadius: '12px' }} />
+                <div style={{ marginTop: '0.9rem', display: 'grid', gap: '0.4rem', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                  <span><MapPin size={14} /> {issue.image_context?.address || getIssueAddress(issue)}</span>
+                  <span><Calendar size={14} /> {issue.image_context?.captured_at ? new Date(issue.image_context.captured_at).toLocaleString() : new Date(issue.createdAt || issue.created_at).toLocaleString()}</span>
+                </div>
+              </div>
+            ) : (
+              <div style={{ height: '150px', background: 'var(--bg-main)', borderRadius: '12px', border: '2px dashed var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', textAlign: 'center', padding: '1rem', marginTop: '0.5rem' }}>
+                No citizen photo submitted.
+              </div>
+            )}
+          </div>
+
+          <div className="glass section" style={{ padding: '2rem', marginBottom: '2rem' }}>
             <h3>Proof of Work</h3>
             <div style={{ marginTop: '1.5rem' }}>
               <h4>Before</h4>
-              <img src={issue.work_proof.before_image} alt="Before" style={{ width: '100%', borderRadius: '12px', marginTop: '0.5rem' }} />
+              {issue.work_proof?.before_image ? (
+                <img src={resolveApiAssetUrl(issue.work_proof.before_image)} alt="Before" style={{ width: '100%', borderRadius: '12px', marginTop: '0.5rem' }} />
+              ) : (
+                <div style={{ height: '150px', background: 'var(--bg-main)', borderRadius: '12px', border: '2px dashed var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', textAlign: 'center', padding: '1rem', marginTop: '0.5rem' }}>
+                  No before image submitted.
+                </div>
+              )}
               
               <h4 style={{ marginTop: '2rem' }}>After</h4>
-              {issue.work_proof.after_image ? (
-                <img src={issue.work_proof.after_image} alt="After" style={{ width: '100%', borderRadius: '12px', marginTop: '0.5rem' }} />
+              {issue.work_proof?.after_image ? (
+                <img src={resolveApiAssetUrl(issue.work_proof.after_image)} alt="After" style={{ width: '100%', borderRadius: '12px', marginTop: '0.5rem' }} />
               ) : (
                 <div style={{ height: '150px', background: 'var(--bg-main)', borderRadius: '12px', border: '2px dashed var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', textAlign: 'center', padding: '1rem', marginTop: '0.5rem' }}>
                   Awaiting completion...

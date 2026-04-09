@@ -1,22 +1,229 @@
 const express = require('express');
 const router = express.Router();
+const fs = require('fs');
+const multer = require('multer');
+const path = require('path');
 const Complaint = require('../models/Complaint');
 const Notification = require('../models/Notification');
 const User = require('../models/User');
 const { auth, authorize } = require('../middleware/auth');
 const { hasRole, hasStatus } = require('../utils/userAccess');
+const { reverseGeocodeCoordinates } = require('../utils/geocoding');
+
+const ISSUE_UPLOAD_DIRECTORY = path.join(__dirname, '..', 'uploads', 'issues');
+const SAFE_IMAGE_PATTERN = /^\/uploads\/issues\/[A-Za-z0-9._-]+\.(jpg|jpeg|png)$/i;
+
+const imageUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      cb(null, ISSUE_UPLOAD_DIRECTORY);
+    },
+    filename: (req, file, cb) => {
+      const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+      cb(null, `${uniqueSuffix}${path.extname(file.originalname).toLowerCase()}`);
+    }
+  }),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const filetypes = /jpeg|jpg|png/;
+    const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = filetypes.test(file.mimetype);
+
+    if (mimetype && extname) {
+      return cb(null, true);
+    }
+
+    cb(new Error('Only JPG, JPEG, and PNG images are allowed'));
+  }
+});
+
+const parseLocationInput = (location) => {
+  if (!location) return null;
+  if (typeof location === 'string') {
+    try {
+      return JSON.parse(location);
+    } catch {
+      return null;
+    }
+  }
+  return location;
+};
+
+const parseJsonInput = (value) => {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  return value;
+};
+
+const formatCoordinates = (lat, lng) => `Lat ${Number(lat).toFixed(5)}, Lng ${Number(lng).toFixed(5)}`;
+
+const normalizeAddress = (address) => (
+  typeof address === 'string' && address.trim()
+    ? address.trim()
+    : ''
+);
+
+const looksLikeCoordinateAddress = (address) => /^lat\s/i.test(normalizeAddress(address));
+
+const normalizeLocation = async (locationInput) => {
+  const lat = Number(locationInput?.lat);
+  const lng = Number(locationInput?.lng);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return null;
+  }
+
+  let address = normalizeAddress(locationInput?.address);
+
+  if (!address || looksLikeCoordinateAddress(address)) {
+    address = await reverseGeocodeCoordinates(lat, lng);
+  }
+
+  return {
+    lat,
+    lng,
+    address: address || formatCoordinates(lat, lng)
+  };
+};
+
+const buildImageContext = (rawImageContext, location, imageSource) => {
+  const imageContext = parseJsonInput(rawImageContext) || {};
+  const capturedAt = imageContext?.capturedAt ? new Date(imageContext.capturedAt) : null;
+  const validCapturedAt = capturedAt && !Number.isNaN(capturedAt.getTime()) ? capturedAt : null;
+
+  if (!imageSource && !Object.keys(imageContext).length) {
+    return null;
+  }
+
+  return {
+    source: imageContext?.source || (imageSource ? 'report_upload' : undefined),
+    captured_at: validCapturedAt || undefined,
+    address: normalizeAddress(imageContext?.address) || location?.address || '',
+    lat: Number.isFinite(Number(imageContext?.lat)) ? Number(imageContext.lat) : location?.lat,
+    lng: Number.isFinite(Number(imageContext?.lng)) ? Number(imageContext.lng) : location?.lng,
+    overlay_label: normalizeAddress(imageContext?.overlayLabel)
+  };
+};
+
+const createNotification = async ({ userId, title, message, type = 'INFO', complaintId }) => {
+  if (!userId || !message) {
+    return null;
+  }
+
+  const recipient = await User.findById(userId).select('notification_preferences');
+  const preferences = recipient?.notification_preferences || {};
+  const normalizedType = String(type || '').toUpperCase();
+
+  if (normalizedType === 'ASSIGNMENT' && preferences.assignment_alerts === false) {
+    return null;
+  }
+
+  if (normalizedType === 'SUCCESS' && preferences.completion_alerts === false) {
+    return null;
+  }
+
+  if (normalizedType === 'INFO' && preferences.issue_updates === false) {
+    return null;
+  }
+
+  return Notification.create({
+    user_id: userId,
+    title,
+    message,
+    type,
+    complaint_id: complaintId,
+    status: 'unread',
+    read: false
+  });
+};
+
+const notifyCitizen = async (complaint, status) => {
+  const normalizedStatus = String(status || '').toLowerCase();
+
+  if (normalizedStatus === 'assigned_to_worker') {
+    return createNotification({
+      userId: complaint.created_by,
+      title: 'Worker assigned',
+      message: `A worker has been assigned to your reported issue "${complaint.title}".`,
+      type: 'ASSIGNMENT',
+      complaintId: complaint._id
+    });
+  }
+
+  if (normalizedStatus === 'in_progress') {
+    return createNotification({
+      userId: complaint.created_by,
+      title: 'Issue in progress',
+      message: `Work is now in progress for your reported issue "${complaint.title}".`,
+      type: 'INFO',
+      complaintId: complaint._id
+    });
+  }
+
+  if (normalizedStatus === 'completed') {
+    return createNotification({
+      userId: complaint.created_by,
+      title: 'Issue resolved',
+      message: `Your reported issue "${complaint.title}" has been successfully resolved ✅`,
+      type: 'SUCCESS',
+      complaintId: complaint._id
+    });
+  }
+
+  return createNotification({
+    userId: complaint.created_by,
+    title: 'Issue update',
+    message: `Issue status updated to ${normalizedStatus.replace(/_/g, ' ')}: ${complaint.title}`,
+    type: 'INFO',
+    complaintId: complaint._id
+  });
+};
+
+const isSafeExistingImage = (imagePath) => {
+  if (!imagePath || typeof imagePath !== 'string') {
+    return false;
+  }
+
+  if (/^https?:\/\//i.test(imagePath)) {
+    return true;
+  }
+
+  if (!SAFE_IMAGE_PATTERN.test(imagePath)) {
+    return false;
+  }
+
+  const normalizedRelativePath = imagePath.replace(/^\/uploads\//, '').replace(/\//g, path.sep);
+  const resolvedPath = path.resolve(path.join(__dirname, '..', 'uploads', normalizedRelativePath));
+  return resolvedPath.startsWith(ISSUE_UPLOAD_DIRECTORY) && fs.existsSync(resolvedPath);
+};
 
 // Create Complaint
-router.post('/', auth, async (req, res) => {
+router.post('/', auth, imageUpload.single('imageFile'), async (req, res) => {
   try {
-    const { title, description, category, priority, location, image } = req.body;
+    const { title, description, priority } = req.body;
+    const location = await normalizeLocation(parseLocationInput(req.body.location));
+    const uploadedImage = req.file ? `/uploads/issues/${req.file.filename}` : null;
+    const image = uploadedImage || req.body.image;
+    const imageContext = buildImageContext(req.body.imageContext, location, image);
+
+    if (!Number.isFinite(location?.lat) || !Number.isFinite(location?.lng)) {
+      return res.status(400).json({ message: 'A valid issue location is required' });
+    }
+
+    if (image && !isSafeExistingImage(image)) {
+      return res.status(400).json({ message: 'Invalid image selection' });
+    }
     
     // Duplicate Detection (Location-based: 100m radius approximately 0.001 deg)
     const duplicate = await Complaint.findOne({
-      location: {
-        lat: { $gt: location.lat - 0.001, $lt: location.lat + 0.001 },
-        lng: { $gt: location.lng - 0.001, $lt: location.lng + 0.001 }
-      },
+      lat: { $gt: location.lat - 0.001, $lt: location.lat + 0.001 },
+      lng: { $gt: location.lng - 0.001, $lt: location.lng + 0.001 },
       status: { $in: ['pending', 'in_progress'] }
     });
 
@@ -35,13 +242,38 @@ router.post('/', auth, async (req, res) => {
       title,
       description,
       priority,
+      address: location.address,
+      lat: location.lat,
+      lng: location.lng,
       location,
+      image,
+      image_context: imageContext,
       created_by: req.user.id,
       sla_expiry
     });
 
     await complaint.save();
     res.status(201).json(complaint);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+router.get('/reverse-geocode', auth, async (req, res) => {
+  try {
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return res.status(400).json({ message: 'Valid latitude and longitude are required.' });
+    }
+
+    const address = await reverseGeocodeCoordinates(lat, lng);
+    res.json({
+      lat,
+      lng,
+      address: address || formatCoordinates(lat, lng)
+    });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }
@@ -123,14 +355,16 @@ router.post('/assign/:id', auth, authorize('head'), async (req, res) => {
     // Create Notification for Assignee
     const assigneeId = worker_id || volunteer_id;
     if (assigneeId) {
-      const notification = new Notification({
-        user_id: assigneeId,
+      await createNotification({
+        userId: assigneeId,
+        title: 'New assignment',
         message: `New task assigned: ${complaint.title}`,
-        type: 'assignment',
-        complaint_id: complaint._id
+        type: 'ASSIGNMENT',
+        complaintId: complaint._id
       });
-      await notification.save();
     }
+
+    await notifyCitizen(complaint, 'assigned_to_worker');
 
     res.json({ message: 'Task assigned successfully', complaint });
   } catch (err) {
@@ -157,6 +391,7 @@ router.post('/start-work/:id', auth, authorize('worker', 'volunteer'), async (re
     });
 
     await complaint.save();
+    await notifyCitizen(complaint, 'in_progress');
     res.json({ message: 'Work started', complaint });
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
@@ -196,14 +431,7 @@ router.post('/update-status/:id', auth, authorize('worker', 'volunteer'), async 
 
     await complaint.save();
 
-    // Notify Citizen (Report Creator)
-    const citizenNotification = new Notification({
-      user_id: complaint.created_by,
-      message: `Issue status updated to ${status.replace('_', ' ')}: ${complaint.title}`,
-      type: 'status_update',
-      complaint_id: complaint._id
-    });
-    await citizenNotification.save();
+    await notifyCitizen(complaint, status);
 
     res.json({ message: 'Status updated successfully', complaint });
   } catch (err) {
