@@ -5,7 +5,6 @@ import { Search, ChevronRight, X, Building2, MapPin, Image as ImageIcon } from '
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import iconShadow from 'leaflet/dist/images/marker-shadow.png';
 import { hasRole } from '../utils/userAccess';
 
 const getIssueAddress = (issue) => (
@@ -29,7 +28,8 @@ const getIssueCoordinates = (issue) => {
 
 const getMarkerStatusTone = (status) => {
   if (status === 'completed') return 'completed';
-  if (status === 'in_progress' || status === 'assigned_to_dept' || status === 'assigned_to_worker') return 'in-progress';
+  if (['verified', 'waiting_for_verification'].includes(status)) return 'review';
+  if (['in_progress', 'assigned_to_dept', 'assigned_to_worker', 'rework_required'].includes(status)) return 'in-progress';
   return 'pending';
 };
 
@@ -54,7 +54,19 @@ const getMarkerIcon = (status) => {
   return markerIconCache.get(tone);
 };
 
-const getStatusLabel = (status) => String(status || 'pending').replace(/_/g, ' ');
+const getStatusLabel = (status) => {
+  const labels = {
+    assigned_to_dept: 'Assigned To Department',
+    assigned_to_worker: 'Assigned To Worker',
+    in_progress: 'In Progress',
+    waiting_for_verification: 'Waiting For Verification',
+    verified: 'Verified',
+    rework_required: 'Rework Required',
+    completed: 'Closed'
+  };
+
+  return labels[status] || String(status || 'pending').replace(/_/g, ' ');
+};
 
 const getImageSrc = (issue) => (issue?.image ? resolveApiAssetUrl(issue.image) : '');
 
@@ -231,6 +243,7 @@ const AllIssues = ({ user }) => {
             <strong>Legend</strong>
             <span><i className="legend-dot pending"></i> Pending</span>
             <span><i className="legend-dot in-progress"></i> In Progress</span>
+            <span><i className="legend-dot review"></i> Under Review</span>
             <span><i className="legend-dot completed"></i> Completed</span>
           </div>
         </div>
@@ -400,6 +413,9 @@ const AllIssues = ({ user }) => {
         .status-indicator[data-status="assigned_to_dept"] { background: #facc15; }
         .status-indicator[data-status="assigned_to_worker"] { background: #facc15; }
         .status-indicator[data-status="in_progress"] { background: #facc15; }
+        .status-indicator[data-status="waiting_for_verification"] { background: #0ea5e9; }
+        .status-indicator[data-status="verified"] { background: #10b981; }
+        .status-indicator[data-status="rework_required"] { background: #fb7185; }
         .status-indicator[data-status="completed"] { background: #16a34a; }
 
         .issue-main { min-width: 0; }
@@ -424,6 +440,9 @@ const AllIssues = ({ user }) => {
         .status-badge.assigned_to_dept { background: rgba(250, 204, 21, 0.18); color: #a16207; }
         .status-badge.assigned_to_worker { background: rgba(250, 204, 21, 0.18); color: #a16207; }
         .status-badge.in_progress { background: rgba(250, 204, 21, 0.18); color: #a16207; }
+        .status-badge.waiting_for_verification { background: rgba(14, 165, 233, 0.14); color: #0369a1; }
+        .status-badge.verified { background: rgba(16, 185, 129, 0.14); color: #047857; }
+        .status-badge.rework_required { background: rgba(244, 63, 94, 0.12); color: #be123c; }
         .status-badge.completed { background: rgba(22, 163, 74, 0.1); color: #16a34a; }
 
         .map-wrapper {
@@ -471,6 +490,11 @@ const AllIssues = ({ user }) => {
         .legend-dot.in-progress,
         .issue-marker-dot.in-progress {
           background: #facc15;
+        }
+
+        .legend-dot.review,
+        .issue-marker-dot.review {
+          background: #0ea5e9;
         }
 
         .legend-dot.completed,

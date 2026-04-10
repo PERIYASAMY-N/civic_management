@@ -14,7 +14,16 @@ const complaintSchema = new mongoose.Schema({
   },
   status: { 
     type: String, 
-    enum: ['pending', 'assigned_to_dept', 'assigned_to_worker', 'in_progress', 'completed'], 
+    enum: [
+      'pending',
+      'assigned_to_dept',
+      'assigned_to_worker',
+      'in_progress',
+      'waiting_for_verification',
+      'verified',
+      'rework_required',
+      'completed'
+    ], 
     default: 'pending' 
   },
   priority: { 
@@ -39,6 +48,18 @@ const complaintSchema = new mongoose.Schema({
     before_image: String,
     after_image: String,
     completed_at: Date
+  },
+  beforeImage: { type: String },
+  afterImage: { type: String },
+  verification: {
+    status: {
+      type: String,
+      enum: ['pending', 'approved', 'rejected'],
+      default: 'pending'
+    },
+    verified_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    verified_at: Date,
+    comments: String
   },
   image_context: {
     source: { type: String },

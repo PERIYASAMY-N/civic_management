@@ -5,6 +5,8 @@ const Department = require('../models/Department');
 const { auth, authorize } = require('../middleware/auth');
 const { getRoleValues, getStatusValues, hasRole } = require('../utils/userAccess');
 
+const DEPARTMENT_COMPLETED_STATUSES = ['verified', 'completed'];
+
 // Get Pending Users (Admin Only)
 router.get('/users/pending', auth, authorize('admin'), async (req, res) => {
   try {
@@ -125,17 +127,17 @@ router.get('/department-stats', auth, authorize('admin'), async (req, res) => {
           },
           inProgress: { 
             $size: { 
-              $filter: { input: "$issues", as: "i", cond: { $eq: ["$$i.status", "in_progress"] } } 
+              $filter: { input: "$issues", as: "i", cond: { $in: ["$$i.status", ["in_progress", "waiting_for_verification", "rework_required"]] } } 
             } 
           },
           completed: { 
             $size: { 
-              $filter: { input: "$issues", as: "i", cond: { $eq: ["$$i.status", "completed"] } } 
+              $filter: { input: "$issues", as: "i", cond: { $in: ["$$i.status", DEPARTMENT_COMPLETED_STATUSES] } } 
             } 
           },
           incomplete: { 
             $size: { 
-              $filter: { input: "$issues", as: "i", cond: { $ne: ["$$i.status", "completed"] } } 
+              $filter: { input: "$issues", as: "i", cond: { $not: { $in: ["$$i.status", DEPARTMENT_COMPLETED_STATUSES] } } } 
             } 
           },
           proofSubmitted: {
@@ -165,13 +167,15 @@ router.get('/dashboard-stats', auth, authorize('admin'), async (req, res) => {
       pending: 0,
       in_progress: 0,
       completed: 0,
+      verified: 0,
       volunteers: 0,
       pendingVolunteers: 0
     };
 
     issueStats.forEach(s => {
-      if (s._id === 'pending') stats.pending = s.count;
-      if (s._id === 'in_progress') stats.in_progress = s.count;
+      if (['pending', 'assigned_to_dept', 'assigned_to_worker'].includes(s._id)) stats.pending += s.count;
+      if (['in_progress', 'waiting_for_verification', 'rework_required'].includes(s._id)) stats.in_progress += s.count;
+      if (s._id === 'verified') stats.verified = s.count;
       if (s._id === 'completed') stats.completed = s.count;
     });
 

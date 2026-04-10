@@ -6,7 +6,7 @@ const { getRoleValues } = require('../utils/userAccess');
 const router = express.Router();
 
 const COMPLETED_STATUS = 'completed';
-const IN_PROGRESS_STATUS = 'in_progress';
+const IN_PROGRESS_STATUSES = ['in_progress', 'waiting_for_verification', 'rework_required', 'verified'];
 const PENDING_STATUSES = ['pending', 'assigned_to_dept', 'assigned_to_worker'];
 
 const roundPercentage = (completed, total) => {
@@ -46,7 +46,7 @@ const getDepartmentPerformance = async () => {
           },
           inProgress: {
             $sum: {
-              $cond: [{ $eq: ['$status', IN_PROGRESS_STATUS] }, 1, 0]
+              $cond: [{ $in: ['$status', IN_PROGRESS_STATUSES] }, 1, 0]
             }
           },
           pending: {

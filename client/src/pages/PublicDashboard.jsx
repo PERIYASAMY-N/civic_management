@@ -455,15 +455,19 @@ const PublicDashboard = () => {
   );
 };
 
-const MetricCard = ({ icon: Icon, label, value, accent }) => (
-  <div className="metric-card">
-    <div className="metric-icon" style={{ background: `${accent}18`, color: accent }}>
-      <Icon size={22} />
+const MetricCard = ({ icon, label, value, accent }) => {
+  const IconComponent = icon;
+
+  return (
+    <div className="metric-card">
+      <div className="metric-icon" style={{ background: `${accent}18`, color: accent }}>
+        <IconComponent size={22} />
+      </div>
+      <span>{label}</span>
+      <strong>{value}</strong>
     </div>
-    <span>{label}</span>
-    <strong>{value}</strong>
-  </div>
-);
+  );
+};
 
 const DepartmentStat = ({ label, value, tone }) => (
   <div className={`department-stat ${tone || ''}`}>
@@ -472,13 +476,17 @@ const DepartmentStat = ({ label, value, tone }) => (
   </div>
 );
 
-const EmptyState = ({ icon: Icon, title, description }) => (
-  <div className="empty-state">
-    <Icon size={26} />
-    <strong>{title}</strong>
-    <span>{description}</span>
-  </div>
-);
+const EmptyState = ({ icon, title, description }) => {
+  const IconComponent = icon;
+
+  return (
+    <div className="empty-state">
+      <IconComponent size={26} />
+      <strong>{title}</strong>
+      <span>{description}</span>
+    </div>
+  );
+};
 
 const DashboardStyles = () => (
   <style>{`

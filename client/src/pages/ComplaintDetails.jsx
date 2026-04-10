@@ -12,6 +12,26 @@ const getIssueAddress = (issue) => (
     : 'Location unavailable')
 );
 
+const getStatusLabel = (status) => {
+  const labels = {
+    assigned_to_dept: 'Assigned To Department',
+    assigned_to_worker: 'Assigned To Worker',
+    in_progress: 'In Progress',
+    waiting_for_verification: 'Waiting For Verification',
+    verified: 'Verified',
+    rework_required: 'Rework Required',
+    completed: 'Closed'
+  };
+
+  return labels[status] || String(status || 'pending').replace(/_/g, ' ');
+};
+
+const getProofImage = (issue, stage) => (
+  stage === 'before'
+    ? issue?.beforeImage || issue?.work_proof?.before_image || ''
+    : issue?.afterImage || issue?.work_proof?.after_image || ''
+);
+
 const ComplaintDetails = () => {
   const { id } = useParams();
   const [issue, setIssue] = useState(null);
@@ -39,7 +59,7 @@ const ComplaintDetails = () => {
       <div className="detail-header glass">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
-            <span className={`status-badge ${issue.status}`}>{issue.status}</span>
+            <span className={`status-badge ${issue.status}`}>{getStatusLabel(issue.status)}</span>
             <h2 style={{ fontSize: '2.5rem', margin: '1rem 0' }}>{issue.title}</h2>
             <div className="meta-row">
               <span className="meta-item"><MapPin size={18} /> {getIssueAddress(issue)}</span>
@@ -68,7 +88,7 @@ const ComplaintDetails = () => {
                   <div className="marker"></div>
                   <div className="event-info">
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span className="event-status">{event.status.replace('_', ' ')}</span>
+                      <span className="event-status">{getStatusLabel(event.status)}</span>
                       <span className="event-time">{new Date(event.timestamp).toLocaleString()}</span>
                     </div>
                     <p>{event.comments}</p>
@@ -102,8 +122,8 @@ const ComplaintDetails = () => {
             <h3>Proof of Work</h3>
             <div style={{ marginTop: '1.5rem' }}>
               <h4>Before</h4>
-              {issue.work_proof?.before_image ? (
-                <img src={resolveApiAssetUrl(issue.work_proof.before_image)} alt="Before" style={{ width: '100%', borderRadius: '12px', marginTop: '0.5rem' }} />
+              {getProofImage(issue, 'before') ? (
+                <img src={resolveApiAssetUrl(getProofImage(issue, 'before'))} alt="Before" style={{ width: '100%', borderRadius: '12px', marginTop: '0.5rem' }} />
               ) : (
                 <div style={{ height: '150px', background: 'var(--bg-main)', borderRadius: '12px', border: '2px dashed var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', textAlign: 'center', padding: '1rem', marginTop: '0.5rem' }}>
                   No before image submitted.
@@ -111,13 +131,22 @@ const ComplaintDetails = () => {
               )}
               
               <h4 style={{ marginTop: '2rem' }}>After</h4>
-              {issue.work_proof?.after_image ? (
-                <img src={resolveApiAssetUrl(issue.work_proof.after_image)} alt="After" style={{ width: '100%', borderRadius: '12px', marginTop: '0.5rem' }} />
+              {getProofImage(issue, 'after') ? (
+                <img src={resolveApiAssetUrl(getProofImage(issue, 'after'))} alt="After" style={{ width: '100%', borderRadius: '12px', marginTop: '0.5rem' }} />
               ) : (
                 <div style={{ height: '150px', background: 'var(--bg-main)', borderRadius: '12px', border: '2px dashed var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', textAlign: 'center', padding: '1rem', marginTop: '0.5rem' }}>
                   Awaiting completion...
                 </div>
               )}
+            </div>
+          </div>
+
+          <div className="glass section" style={{ padding: '2rem' }}>
+            <h3>Verification</h3>
+            <div style={{ marginTop: '1rem', display: 'grid', gap: '0.5rem', color: 'var(--text-muted)' }}>
+              <p><strong style={{ color: 'var(--text-main)' }}>Review Status:</strong> {getStatusLabel(issue.status)}</p>
+              <p><strong style={{ color: 'var(--text-main)' }}>Department Head Decision:</strong> {issue.verification?.status || 'pending'}</p>
+              <p><strong style={{ color: 'var(--text-main)' }}>Notes:</strong> {issue.verification?.comments || 'No verification notes yet.'}</p>
             </div>
           </div>
         </div>

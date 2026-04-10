@@ -38,6 +38,7 @@ app.use((req, res, next) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/user', require('./routes/user'));
 app.use('/api/departments', require('./routes/departments'));
+app.use('/api/images', require('./routes/images'));
 app.use('/api/complaints', require('./routes/complaints'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/notifications', require('./routes/notifications'));

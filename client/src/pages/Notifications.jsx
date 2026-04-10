@@ -1,5 +1,5 @@
 import { useNotification } from '../context/NotificationContext';
-import { Bell, Check, Clock, CheckCircle2, Briefcase, Activity } from 'lucide-react';
+import { Bell, Check, Clock, CheckCircle2, Briefcase, Activity, AlertTriangle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 const getNotificationIcon = (notification) => {
@@ -9,6 +9,9 @@ const getNotificationIcon = (notification) => {
   }
   if (normalizedType === 'ASSIGNMENT') {
     return <Briefcase size={20} color="#0ea5e9" />;
+  }
+  if (normalizedType === 'ERROR') {
+    return <AlertTriangle size={20} color="#e11d48" />;
   }
   return <Activity size={20} color="var(--primary)" />;
 };

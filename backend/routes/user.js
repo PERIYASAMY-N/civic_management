@@ -10,6 +10,7 @@ const router = express.Router();
 
 const PHONE_REGEX = /^\+?[1-9]\d{9,14}$/;
 const PASSWORD_STRENGTH_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
+const VERIFIED_OR_COMPLETED_STATUSES = ['verified', 'completed'];
 
 const profileUpload = multer({
   storage: multer.diskStorage({
@@ -50,7 +51,7 @@ const buildActivitySummary = async (user) => {
 
   if (hasRole(user.role, 'worker')) {
     const [tasksCompleted, assignedTasks] = await Promise.all([
-      Complaint.countDocuments({ assigned_worker_id: user._id, status: 'completed' }),
+      Complaint.countDocuments({ assigned_worker_id: user._id, status: { $in: VERIFIED_OR_COMPLETED_STATUSES } }),
       Complaint.countDocuments({ assigned_worker_id: user._id })
     ]);
 
@@ -62,7 +63,7 @@ const buildActivitySummary = async (user) => {
 
   if (hasRole(user.role, 'volunteer')) {
     const [tasksCompleted, assignedTasks] = await Promise.all([
-      Complaint.countDocuments({ assigned_volunteer_id: user._id, status: 'completed' }),
+      Complaint.countDocuments({ assigned_volunteer_id: user._id, status: { $in: VERIFIED_OR_COMPLETED_STATUSES } }),
       Complaint.countDocuments({ assigned_volunteer_id: user._id })
     ]);
 
@@ -83,11 +84,11 @@ const buildActivitySummary = async (user) => {
       }),
       Complaint.countDocuments({
         department_id: user.department_id,
-        status: { $in: ['assigned_to_worker', 'in_progress'] }
+        status: { $in: ['assigned_to_worker', 'in_progress', 'waiting_for_verification', 'rework_required'] }
       }),
       Complaint.countDocuments({
         department_id: user.department_id,
-        status: 'completed'
+        status: { $in: VERIFIED_OR_COMPLETED_STATUSES }
       })
     ]);
 

@@ -113,13 +113,25 @@ input:focus {
 .issue-item { display: flex; align-items: center; gap: 1.5rem; padding: 1.5rem; margin-bottom: 1rem; position: relative; overflow: hidden; }
 .status-indicator { width: 4px; height: 100%; position: absolute; left: 0; top: 0; }
 .status-indicator[data-status="pending"] { background: var(--warning); }
+.status-indicator[data-status="assigned_to_dept"] { background: var(--warning); }
+.status-indicator[data-status="assigned_to_worker"] { background: var(--warning); }
 .status-indicator[data-status="in_progress"] { background: var(--primary); }
+.status-indicator[data-status="waiting_for_verification"] { background: #0ea5e9; }
+.status-indicator[data-status="verified"] { background: var(--success); }
+.status-indicator[data-status="rework_required"] { background: var(--danger); }
 .status-indicator[data-status="resolved"] { background: var(--success); }
+.status-indicator[data-status="completed"] { background: var(--success); }
 
 .status-badge { padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; }
 .status-badge.pending { background: rgba(245, 158, 11, 0.1); color: var(--warning); }
+.status-badge.assigned_to_dept,
+.status-badge.assigned_to_worker { background: rgba(245, 158, 11, 0.1); color: #a16207; }
 .status-badge.in_progress { background: rgba(79, 70, 229, 0.1); color: var(--primary); }
+.status-badge.waiting_for_verification { background: rgba(14, 165, 233, 0.14); color: #0369a1; }
+.status-badge.verified { background: rgba(16, 185, 129, 0.12); color: #047857; }
+.status-badge.rework_required { background: rgba(244, 63, 94, 0.12); color: #be123c; }
 .status-badge.resolved { background: rgba(16, 185, 129, 0.1); color: var(--success); }
+.status-badge.completed { background: rgba(16, 185, 129, 0.1); color: var(--success); }
 
 .priority-tag { font-size: 0.7rem; font-weight: 700; padding: 0.1rem 0.5rem; border-radius: 4px; text-transform: uppercase; }
 .priority-tag.high { background: rgba(244, 63, 94, 0.1); color: var(--danger); }
