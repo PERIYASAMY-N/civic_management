@@ -101,6 +101,46 @@ const normalizeBodyString = (value) => (typeof value === 'string' ? value.trim()
 
 const toProofPath = (file) => (file ? `/uploads/proofs/${file.filename}` : '');
 
+const normalizeGeoDate = (value) => {
+  if (!value) {
+    return new Date();
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+};
+
+const getProofGeoInput = (body, prefix) => {
+  const lat = Number(body?.[`${prefix}Lat`]);
+  const lng = Number(body?.[`${prefix}Lng`]);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return null;
+  }
+
+  return {
+    lat,
+    lng,
+    address: normalizeBodyString(body?.[`${prefix}Address`]),
+    time: normalizeGeoDate(body?.[`${prefix}Time`])
+  };
+};
+
+const enrichProofGeo = async (body, prefix) => {
+  const input = getProofGeoInput(body, prefix);
+  if (!input) {
+    return null;
+  }
+
+  const addressFromGeo = await reverseGeocodeCoordinates(input.lat, input.lng).catch(() => '');
+  return {
+    lat: input.lat,
+    lng: input.lng,
+    address: addressFromGeo || input.address || formatCoordinates(input.lat, input.lng),
+    time: input.time
+  };
+};
+
 const parseLocationInput = (location) => {
   if (!location) return null;
   if (typeof location === 'string') {
@@ -526,9 +566,14 @@ router.post('/start-work/:id', auth, authorize('worker', 'volunteer'), async (re
     const before_image = beforeUpload
       ? toProofPath(beforeUpload)
       : normalizeBodyString(req.body.beforeImage || req.body.before_image);
+    const beforeGeo = await enrichProofGeo(req.body, 'before');
 
     if (!before_image || !isSafeProofImage(before_image)) {
       return res.status(400).json({ message: 'A valid before-work proof image is required to start work' });
+    }
+
+    if (!beforeGeo) {
+      return res.status(400).json({ message: 'Location access required' });
     }
 
     const previousStatus = complaint.status;
@@ -544,6 +589,18 @@ router.post('/start-work/:id', auth, authorize('worker', 'volunteer'), async (re
     complaint.afterImage = undefined;
     complaint.billImage = undefined;
     complaint.workDescription = '';
+    complaint.billLat = undefined;
+    complaint.billLng = undefined;
+    complaint.billAddress = '';
+    complaint.billTime = undefined;
+    complaint.beforeLat = beforeGeo.lat;
+    complaint.beforeLng = beforeGeo.lng;
+    complaint.beforeAddress = beforeGeo.address;
+    complaint.beforeTime = beforeGeo.time;
+    complaint.afterLat = undefined;
+    complaint.afterLng = undefined;
+    complaint.afterAddress = '';
+    complaint.afterTime = undefined;
     complaint.verification = {
       status: 'pending',
       verified_by: undefined,
@@ -599,6 +656,8 @@ router.post('/update-status/:id', auth, authorize('worker', 'volunteer'), async 
       ? toProofPath(billUpload)
       : normalizeBodyString(req.body.billImage || req.body.bill_image);
     const workDescription = normalizeBodyString(req.body.workDescription || req.body.description);
+    const afterGeo = await enrichProofGeo(req.body, 'after');
+    const billGeo = await enrichProofGeo(req.body, 'bill');
 
     if (!existingBeforeImage || !isSafeProofImage(existingBeforeImage)) {
       return res.status(400).json({ message: 'Before-work proof is required before completing this task' });
@@ -616,6 +675,10 @@ router.post('/update-status/:id', auth, authorize('worker', 'volunteer'), async 
       return res.status(400).json({ message: 'A work description is required to complete this task' });
     }
 
+    if (!afterGeo || !billGeo) {
+      return res.status(400).json({ message: 'Location access required' });
+    }
+
     complaint.status = WORKER_REVIEW_STATUS;
     complaint.work_proof = complaint.work_proof || {};
     complaint.work_proof.before_image = existingBeforeImage;
@@ -627,6 +690,14 @@ router.post('/update-status/:id', auth, authorize('worker', 'volunteer'), async 
     complaint.work_proof.description = workDescription;
     complaint.workDescription = workDescription;
     complaint.work_proof.completed_at = new Date();
+    complaint.afterLat = afterGeo.lat;
+    complaint.afterLng = afterGeo.lng;
+    complaint.afterAddress = afterGeo.address;
+    complaint.afterTime = afterGeo.time;
+    complaint.billLat = billGeo.lat;
+    complaint.billLng = billGeo.lng;
+    complaint.billAddress = billGeo.address;
+    complaint.billTime = billGeo.time;
     complaint.verification = {
       status: 'pending',
       verified_by: undefined,

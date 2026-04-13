@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Camera, Image as ImageIcon, MapPin, Upload } from 'lucide-react';
+import { Camera, Clock, Image as ImageIcon, MapPin, Upload } from 'lucide-react';
 import api, { resolveApiAssetUrl } from '../api';
 
 const getStatusLabel = (status) => {
@@ -35,6 +35,7 @@ const getProofImage = (task, stage) => {
 };
 
 const supportedImageTypes = new Set(['image/jpeg', 'image/jpg', 'image/png']);
+const NINETY_SECONDS = 90000;
 
 const createDraft = () => ({
   selectedFile: null,
@@ -42,6 +43,9 @@ const createDraft = () => ({
   selectedFileName: '',
   selectedImageSource: '',
   description: '',
+  locationLoading: false,
+  locationError: '',
+  geoTag: null,
   cameraOpen: false,
   cameraLoading: false,
   cameraError: '',
@@ -53,6 +57,77 @@ const revokePreviewUrl = (previewUrl) => {
   if (previewUrl?.startsWith('blob:')) {
     URL.revokeObjectURL(previewUrl);
   }
+};
+
+const formatTimestamp = (timestamp) => new Intl.DateTimeFormat('en-IN', {
+  day: '2-digit',
+  month: 'short',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit'
+}).format(new Date(timestamp));
+
+const getCurrentPosition = () => new Promise((resolve, reject) => {
+  if (!navigator.geolocation) {
+    reject(new Error('Location access required'));
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(resolve, reject, {
+    enableHighAccuracy: true,
+    timeout: NINETY_SECONDS / 9,
+    maximumAge: 60000
+  });
+});
+
+const reverseGeocode = async (lat, lng) => {
+  try {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}`,
+      {
+        headers: {
+          Accept: 'application/json'
+        }
+      }
+    );
+
+    const data = await response.json();
+    return data?.display_name || `Lat ${Number(lat).toFixed(5)}, Lng ${Number(lng).toFixed(5)}`;
+  } catch {
+    return `Lat ${Number(lat).toFixed(5)}, Lng ${Number(lng).toFixed(5)}`;
+  }
+};
+
+const buildGeoTag = async () => {
+  const position = await getCurrentPosition();
+  const lat = Number(position.coords.latitude);
+  const lng = Number(position.coords.longitude);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    throw new Error('Location access required');
+  }
+
+  const address = await reverseGeocode(lat, lng);
+  const capturedAt = new Date().toISOString();
+
+  return {
+    lat,
+    lng,
+    address,
+    capturedAt,
+    displayTime: formatTimestamp(capturedAt)
+  };
+};
+
+const getGeoDescription = (geoTag) => {
+  if (!geoTag) {
+    return null;
+  }
+
+  return {
+    address: geoTag.address || '',
+    displayTime: geoTag.displayTime || formatTimestamp(geoTag.capturedAt)
+  };
 };
 
 const WorkerTasks = () => {
@@ -175,7 +250,7 @@ const WorkerTasks = () => {
     return '';
   };
 
-  const setSelectedProof = (taskId, proofType, file, source) => {
+  const setSelectedProof = useCallback((taskId, proofType, file, source, geoTag) => {
     const draftKey = getDraftKey(taskId, proofType);
     const existingDraft = proofDrafts[draftKey];
 
@@ -187,15 +262,47 @@ const WorkerTasks = () => {
       previewUrl: URL.createObjectURL(file),
       selectedFileName: file.name,
       selectedImageSource: source,
+      geoTag,
+      locationError: '',
+      locationLoading: false,
       cameraOpen: false,
       cameraLoading: false,
       cameraError: '',
       formError: '',
       submitLoading: false
     });
-  };
+  }, [closeActiveCamera, proofDrafts, updateDraft]);
 
-  const handleFileSelection = (taskId, proofType, event) => {
+  const captureGeoTag = useCallback(async (draftKey) => {
+    updateDraft(draftKey, {
+      locationLoading: true,
+      locationError: '',
+      formError: ''
+    });
+
+    try {
+      return await buildGeoTag();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Location access required';
+      updateDraft(draftKey, {
+        locationLoading: false,
+        locationError: message || 'Location access required'
+      });
+      throw error;
+    } finally {
+      updateDraft(draftKey, {
+        locationLoading: false
+      });
+    }
+  }, [updateDraft]);
+
+  const setSelectedProofWithGeo = useCallback(async (taskId, proofType, file, source) => {
+    const draftKey = getDraftKey(taskId, proofType);
+    const geoTag = await captureGeoTag(draftKey);
+    setSelectedProof(taskId, proofType, file, source, geoTag);
+  }, [captureGeoTag, setSelectedProof]);
+
+  const handleFileSelection = async (taskId, proofType, event) => {
     const file = event.target.files?.[0];
     if (!file) {
       return;
@@ -212,7 +319,16 @@ const WorkerTasks = () => {
       return;
     }
 
-    setSelectedProof(taskId, proofType, file, 'upload');
+    try {
+      await setSelectedProofWithGeo(taskId, proofType, file, 'upload');
+    } catch {
+      updateDraft(draftKey, {
+        locationLoading: false,
+        locationError: 'Location access required',
+        formError: 'Location access required'
+      });
+    }
+
     event.target.value = '';
   };
 
@@ -298,7 +414,14 @@ const WorkerTasks = () => {
       type: 'image/jpeg'
     });
 
-    setSelectedProof(taskId, proofType, capturedFile, 'camera');
+    try {
+      await setSelectedProofWithGeo(taskId, proofType, capturedFile, 'camera');
+    } catch {
+      updateDraft(draftKey, {
+        locationError: 'Location access required',
+        formError: 'Location access required'
+      });
+    }
   };
 
   const submitStartWork = async (task) => {
@@ -312,6 +435,13 @@ const WorkerTasks = () => {
       return;
     }
 
+    if (!draft.geoTag) {
+      updateDraft(draftKey, {
+        formError: 'Location access required'
+      });
+      return;
+    }
+
     try {
       updateDraft(draftKey, {
         submitLoading: true,
@@ -320,6 +450,10 @@ const WorkerTasks = () => {
 
       const payload = new FormData();
       payload.append('beforeImageFile', draft.selectedFile);
+      payload.append('beforeLat', String(draft.geoTag.lat));
+      payload.append('beforeLng', String(draft.geoTag.lng));
+      payload.append('beforeAddress', draft.geoTag.address || '');
+      payload.append('beforeTime', draft.geoTag.capturedAt);
 
       await api.post(`/complaints/start-work/${task._id}`, payload, {
         headers: {
@@ -356,6 +490,13 @@ const WorkerTasks = () => {
       return;
     }
 
+    if (!afterDraft.geoTag || !billDraft.geoTag) {
+      updateDraft(afterDraftKey, {
+        formError: 'Location access required'
+      });
+      return;
+    }
+
     try {
       updateDraft(afterDraftKey, {
         submitLoading: true,
@@ -367,6 +508,14 @@ const WorkerTasks = () => {
       payload.append('billImageFile', billDraft.selectedFile);
       payload.append('workDescription', afterDraft.description.trim());
       payload.append('status', 'waiting_for_verification');
+      payload.append('afterLat', String(afterDraft.geoTag.lat));
+      payload.append('afterLng', String(afterDraft.geoTag.lng));
+      payload.append('afterAddress', afterDraft.geoTag.address || '');
+      payload.append('afterTime', afterDraft.geoTag.capturedAt);
+      payload.append('billLat', String(billDraft.geoTag.lat));
+      payload.append('billLng', String(billDraft.geoTag.lng));
+      payload.append('billAddress', billDraft.geoTag.address || '');
+      payload.append('billTime', billDraft.geoTag.capturedAt);
 
       await api.post(`/complaints/update-status/${task._id}`, payload, {
         headers: {
@@ -399,11 +548,25 @@ const WorkerTasks = () => {
             <img src={draft.previewUrl} alt={title} className="selected-proof-image" />
             <span>{draft.selectedImageSource === 'camera' ? 'Captured with camera' : 'Uploaded from device'}</span>
             <span>{draft.selectedFileName}</span>
+            {draft.geoTag ? (
+              <div className="selected-proof-meta">
+                <div className="meta-line">
+                  <MapPin size={14} />
+                  <span>{getGeoDescription(draft.geoTag)?.address || 'Location unavailable'}</span>
+                </div>
+                <div className="meta-line">
+                  <Clock size={14} />
+                  <span>{getGeoDescription(draft.geoTag)?.displayTime || 'Time unavailable'}</span>
+                </div>
+              </div>
+            ) : draft.locationLoading ? (
+              <span className="selected-proof-loading">Acquiring location...</span>
+            ) : null}
           </div>
         ) : (
           <div className="proof-placeholder">
             <ImageIcon size={18} />
-            <p>No preview selected yet.</p>
+            <p>{draft.locationLoading ? 'Acquiring location...' : 'No preview selected yet.'}</p>
           </div>
         )}
 
@@ -418,6 +581,55 @@ const WorkerTasks = () => {
           onChange={(event) => handleFileSelection(task._id, proofType, event)}
           style={{ display: 'none' }}
         />
+      </div>
+    );
+  };
+
+  const getStoredProofGeo = (task, stage) => {
+    if (stage === 'before') {
+      return {
+        address: task.beforeAddress || '',
+        time: task.beforeTime || ''
+      };
+    }
+
+    if (stage === 'after') {
+      return {
+        address: task.afterAddress || '',
+        time: task.afterTime || ''
+      };
+    }
+
+    if (stage === 'bill') {
+      return {
+        address: task.billAddress || '',
+        time: task.billTime || ''
+      };
+    }
+
+    return null;
+  };
+
+  const renderStoredGeo = (task, stage) => {
+    const geo = getStoredProofGeo(task, stage);
+    if (!geo?.address && !geo?.time) {
+      return null;
+    }
+
+    return (
+      <div className="proof-geo">
+        {geo.address ? (
+          <div className="meta-line">
+            <MapPin size={14} />
+            <span>{geo.address}</span>
+          </div>
+        ) : null}
+        {geo.time ? (
+          <div className="meta-line">
+            <Clock size={14} />
+            <span>{formatTimestamp(geo.time)}</span>
+          </div>
+        ) : null}
       </div>
     );
   };
@@ -502,6 +714,7 @@ const WorkerTasks = () => {
         ) : null}
 
         {draft.cameraError ? <p className="proof-error">{draft.cameraError}</p> : null}
+        {draft.locationError ? <p className="proof-error">{draft.locationError}</p> : null}
         {draft.formError ? <p className="proof-error">{draft.formError}</p> : null}
 
         {renderPreview(task, 'before', 'Before Photo Preview')}
@@ -565,6 +778,8 @@ const WorkerTasks = () => {
 
           {afterDraft.cameraError ? <p className="proof-error">{afterDraft.cameraError}</p> : null}
           {billDraft.cameraError ? <p className="proof-error">{billDraft.cameraError}</p> : null}
+          {afterDraft.locationError ? <p className="proof-error">{afterDraft.locationError}</p> : null}
+          {billDraft.locationError ? <p className="proof-error">{billDraft.locationError}</p> : null}
           {afterDraft.formError ? <p className="proof-error">{afterDraft.formError}</p> : null}
 
           <button
@@ -598,6 +813,7 @@ const WorkerTasks = () => {
               <p>No before photo available</p>
             </div>
           )}
+          {renderStoredGeo(task, 'before')}
         </div>
         <div className="proof-card">
           <span>After Work Photo</span>
@@ -609,6 +825,7 @@ const WorkerTasks = () => {
               <p>No after photo available</p>
             </div>
           )}
+          {renderStoredGeo(task, 'after')}
         </div>
         <div className="proof-card">
           <span>Bill Proof</span>
@@ -620,6 +837,7 @@ const WorkerTasks = () => {
               <p>No bill proof available</p>
             </div>
           )}
+          {renderStoredGeo(task, 'bill')}
         </div>
         <div className="proof-card proof-description-card">
           <span>Work Description</span>
@@ -892,6 +1110,29 @@ const WorkerTasks = () => {
           color: var(--text-muted);
           font-size: 0.85rem;
           word-break: break-word;
+        }
+
+        .meta-line {
+          display: flex;
+          align-items: center;
+          gap: 0.45rem;
+          font-size: 0.9rem;
+          color: var(--text-muted);
+        }
+
+        .selected-proof-meta,
+        .proof-geo {
+          display: grid;
+          gap: 0.35rem;
+          padding: 0.75rem;
+          border-radius: 14px;
+          border: 1px solid var(--border);
+          background: rgba(148, 163, 184, 0.06);
+        }
+
+        .selected-proof-loading {
+          color: var(--warning);
+          font-size: 0.85rem;
         }
 
         .workflow-warning {

@@ -18,6 +18,27 @@ const getProofImage = (issue, stage) => (
       : issue?.afterImage || issue?.work_proof?.after_image || ''
 );
 
+const getProofGeo = (issue, stage) => {
+  if (stage === 'before') {
+    return {
+      address: issue?.beforeAddress || '',
+      time: issue?.beforeTime || ''
+    };
+  }
+
+  if (stage === 'bill') {
+    return {
+      address: issue?.billAddress || '',
+      time: issue?.billTime || ''
+    };
+  }
+
+  return {
+    address: issue?.afterAddress || '',
+    time: issue?.afterTime || ''
+  };
+};
+
 const DepartmentAssignments = () => {
   const [issues, setIssues] = useState([]);
   const [workers, setWorkers] = useState([]);
@@ -208,9 +229,9 @@ const DepartmentAssignments = () => {
                       </div>
 
                       <div className="proof-grid">
-                        <ProofCard label="Before Image" src={beforeImage} alt={`${issue.title} before work`} />
-                        <ProofCard label="After Image" src={afterImage} alt={`${issue.title} after work`} />
-                        <ProofCard label="Bill Image" src={getProofImage(issue, 'bill')} alt={`${issue.title} bill proof`} />
+                        <ProofCard label="Before Image" src={beforeImage} alt={`${issue.title} before work`} meta={getProofGeo(issue, 'before')} />
+                        <ProofCard label="After Image" src={afterImage} alt={`${issue.title} after work`} meta={getProofGeo(issue, 'after')} />
+                        <ProofCard label="Bill Image" src={getProofImage(issue, 'bill')} alt={`${issue.title} bill proof`} meta={getProofGeo(issue, 'bill')} />
                       </div>
 
                       <div className="verification-note">
@@ -409,6 +430,16 @@ const DepartmentAssignments = () => {
           font-size: 0.9rem;
         }
 
+        .proof-meta {
+          display: grid;
+          gap: 0.35rem;
+          margin-top: 0.7rem;
+          padding: 0.75rem;
+          border-radius: 12px;
+          border: 1px solid var(--border);
+          background: rgba(148, 163, 184, 0.06);
+        }
+
         .proof-card img,
         .proof-placeholder {
           width: 100%;
@@ -493,7 +524,7 @@ const DepartmentAssignments = () => {
   );
 };
 
-const ProofCard = ({ label, src, alt }) => (
+const ProofCard = ({ label, src, alt, meta }) => (
   <div className="proof-card">
     <strong>{label}</strong>
     {src ? (
@@ -504,6 +535,28 @@ const ProofCard = ({ label, src, alt }) => (
         <p>No image available</p>
       </div>
     )}
+    {meta?.address || meta?.time ? (
+      <div className="proof-meta">
+        {meta.address ? (
+          <div className="meta-line">
+            <MapPin size={14} />
+            <span>{meta.address}</span>
+          </div>
+        ) : null}
+        {meta.time ? (
+          <div className="meta-line">
+            <Clock size={14} />
+            <span>{new Intl.DateTimeFormat('en-IN', {
+              day: '2-digit',
+              month: 'short',
+              year: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit'
+            }).format(new Date(meta.time))}</span>
+          </div>
+        ) : null}
+      </div>
+    ) : null}
   </div>
 );
 

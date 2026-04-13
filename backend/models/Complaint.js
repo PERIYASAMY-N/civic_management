@@ -55,6 +55,18 @@ const complaintSchema = new mongoose.Schema({
   afterImage: { type: String },
   billImage: { type: String },
   workDescription: { type: String },
+  billLat: { type: Number },
+  billLng: { type: Number },
+  billAddress: { type: String },
+  billTime: { type: Date },
+  beforeLat: { type: Number },
+  beforeLng: { type: Number },
+  beforeAddress: { type: String },
+  beforeTime: { type: Date },
+  afterLat: { type: Number },
+  afterLng: { type: Number },
+  afterAddress: { type: String },
+  afterTime: { type: Date },
   verification: {
     status: {
       type: String,
