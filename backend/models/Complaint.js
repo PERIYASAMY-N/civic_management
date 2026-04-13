@@ -47,10 +47,14 @@ const complaintSchema = new mongoose.Schema({
   work_proof: {
     before_image: String,
     after_image: String,
+    bill_image: String,
+    description: String,
     completed_at: Date
   },
   beforeImage: { type: String },
   afterImage: { type: String },
+  billImage: { type: String },
+  workDescription: { type: String },
   verification: {
     status: {
       type: String,

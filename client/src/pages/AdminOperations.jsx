@@ -13,7 +13,9 @@ import { getRoleLabel, hasRole } from '../utils/userAccess';
 const getProofImage = (issue, stage) => (
   stage === 'before'
     ? issue?.beforeImage || issue?.work_proof?.before_image || ''
-    : issue?.afterImage || issue?.work_proof?.after_image || ''
+    : stage === 'bill'
+      ? issue?.billImage || issue?.work_proof?.bill_image || ''
+      : issue?.afterImage || issue?.work_proof?.after_image || ''
 );
 
 const AdminOperations = () => {
@@ -191,6 +193,8 @@ const AdminOperations = () => {
                     <div>
                       <h3>{issue.title}</h3>
                       <p>{issue.description}</p>
+                      <p>{issue.workDescription || issue.work_proof?.description || 'No work description provided.'}</p>
+                      <p>{issue.assigned_worker_id?.name || 'Worker not assigned'}</p>
                       <p>{issue.location?.address || issue.address || 'Location unavailable'}</p>
                     </div>
                     <span className={`status-badge ${issue.status}`}>Verified</span>
@@ -199,6 +203,7 @@ const AdminOperations = () => {
                   <div className="proof-grid">
                     <ProofCard label="Before Image" src={getProofImage(issue, 'before')} alt={`${issue.title} before`} />
                     <ProofCard label="After Image" src={getProofImage(issue, 'after')} alt={`${issue.title} after`} />
+                    <ProofCard label="Bill Image" src={getProofImage(issue, 'bill')} alt={`${issue.title} bill`} />
                   </div>
 
                   <button
@@ -206,7 +211,7 @@ const AdminOperations = () => {
                     style={{ justifyContent: 'center' }}
                     onClick={() => void handleCloseIssue(issue._id)}
                   >
-                    Mark Closed
+                    Mark as Completed
                   </button>
                 </article>
               ))

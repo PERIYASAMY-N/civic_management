@@ -13,7 +13,9 @@ import { hasRole } from '../utils/userAccess';
 const getProofImage = (issue, stage) => (
   stage === 'before'
     ? issue?.beforeImage || issue?.work_proof?.before_image || ''
-    : issue?.afterImage || issue?.work_proof?.after_image || ''
+    : stage === 'bill'
+      ? issue?.billImage || issue?.work_proof?.bill_image || ''
+      : issue?.afterImage || issue?.work_proof?.after_image || ''
 );
 
 const DepartmentAssignments = () => {
@@ -194,6 +196,8 @@ const DepartmentAssignments = () => {
                         <div>
                           <h3>{issue.title}</h3>
                           <p>{issue.description}</p>
+                          <p>{issue.workDescription || issue.work_proof?.description || 'No work description provided.'}</p>
+                          <p>{issue.assigned_worker_id?.name || 'Worker not assigned yet'}</p>
                         </div>
                         <span className={`status-badge ${issue.status}`}>Waiting Verification</span>
                       </div>
@@ -206,6 +210,7 @@ const DepartmentAssignments = () => {
                       <div className="proof-grid">
                         <ProofCard label="Before Image" src={beforeImage} alt={`${issue.title} before work`} />
                         <ProofCard label="After Image" src={afterImage} alt={`${issue.title} after work`} />
+                        <ProofCard label="Bill Image" src={getProofImage(issue, 'bill')} alt={`${issue.title} bill proof`} />
                       </div>
 
                       <div className="verification-note">

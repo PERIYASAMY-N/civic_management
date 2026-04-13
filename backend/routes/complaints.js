@@ -65,6 +65,13 @@ const proofUpload = multer({
   }
 });
 
+const WORKER_PROOF_FIELDS = [
+  { name: 'beforeImageFile', maxCount: 1 },
+  { name: 'afterImageFile', maxCount: 1 },
+  { name: 'billImageFile', maxCount: 1 },
+  { name: 'proofImage', maxCount: 1 }
+];
+
 const runUpload = (middleware, req, res) => new Promise((resolve, reject) => {
   middleware(req, res, (err) => {
     if (!err) {
@@ -78,6 +85,21 @@ const runUpload = (middleware, req, res) => new Promise((resolve, reject) => {
     return reject({ status: 400, message: err.message || 'Invalid image upload' });
   });
 });
+
+const getUploadedFile = (files, fieldNames) => {
+  const normalizedFiles = files || {};
+  for (const fieldName of fieldNames) {
+    const value = normalizedFiles[fieldName];
+    if (Array.isArray(value) && value.length > 0) {
+      return value[0];
+    }
+  }
+  return null;
+};
+
+const normalizeBodyString = (value) => (typeof value === 'string' ? value.trim() : '');
+
+const toProofPath = (file) => (file ? `/uploads/proofs/${file.filename}` : '');
 
 const parseLocationInput = (location) => {
   if (!location) return null;
@@ -486,7 +508,7 @@ router.post('/assign/:id', auth, authorize('head'), async (req, res) => {
 // Start Work (Worker/Volunteer Only)
 router.post('/start-work/:id', auth, authorize('worker', 'volunteer'), async (req, res) => {
   try {
-    await runUpload(proofUpload.single('proofImage'), req, res);
+    await runUpload(proofUpload.fields(WORKER_PROOF_FIELDS), req, res);
 
     const complaint = await Complaint.findById(req.params.id);
     if (!complaint) return res.status(404).json({ message: 'Complaint not found' });
@@ -500,9 +522,10 @@ router.post('/start-work/:id', auth, authorize('worker', 'volunteer'), async (re
        return res.status(400).json({ message: 'This task is not ready to start right now' });
     }
 
-    const before_image = req.file
-      ? `/uploads/proofs/${req.file.filename}`
-      : req.body.before_image;
+    const beforeUpload = getUploadedFile(req.files, ['beforeImageFile', 'proofImage']);
+    const before_image = beforeUpload
+      ? toProofPath(beforeUpload)
+      : normalizeBodyString(req.body.beforeImage || req.body.before_image);
 
     if (!before_image || !isSafeProofImage(before_image)) {
       return res.status(400).json({ message: 'A valid before-work proof image is required to start work' });
@@ -514,9 +537,13 @@ router.post('/start-work/:id', auth, authorize('worker', 'volunteer'), async (re
     complaint.work_proof = complaint.work_proof || {};
     complaint.work_proof.before_image = before_image;
     complaint.work_proof.after_image = undefined;
+    complaint.work_proof.bill_image = undefined;
+    complaint.work_proof.description = undefined;
     complaint.work_proof.completed_at = undefined;
     complaint.beforeImage = before_image;
     complaint.afterImage = undefined;
+    complaint.billImage = undefined;
+    complaint.workDescription = '';
     complaint.verification = {
       status: 'pending',
       verified_by: undefined,
@@ -542,9 +569,9 @@ router.post('/start-work/:id', auth, authorize('worker', 'volunteer'), async (re
 // Update Status & Proof (Worker/Volunteer Only)
 router.post('/update-status/:id', auth, authorize('worker', 'volunteer'), async (req, res) => {
   try {
-    await runUpload(proofUpload.single('proofImage'), req, res);
+    await runUpload(proofUpload.fields(WORKER_PROOF_FIELDS), req, res);
 
-    const { status, comments, before_image, after_image } = req.body;
+    const { status, comments } = req.body;
     const complaint = await Complaint.findById(req.params.id);
     if (!complaint) return res.status(404).json({ message: 'Complaint not found' });
 
@@ -563,23 +590,30 @@ router.post('/update-status/:id', auth, authorize('worker', 'volunteer'), async 
     }
 
     const existingBeforeImage = complaint.beforeImage || complaint.work_proof?.before_image || '';
-    const normalizedBeforeImage = typeof before_image === 'string' ? before_image.trim() : '';
-    const normalizedAfterImage = req.file
-      ? `/uploads/proofs/${req.file.filename}`
-      : typeof after_image === 'string'
-        ? after_image.trim()
-        : '';
+    const afterUpload = getUploadedFile(req.files, ['afterImageFile', 'proofImage']);
+    const billUpload = getUploadedFile(req.files, ['billImageFile']);
+    const normalizedAfterImage = afterUpload
+      ? toProofPath(afterUpload)
+      : normalizeBodyString(req.body.afterImage || req.body.after_image);
+    const normalizedBillImage = billUpload
+      ? toProofPath(billUpload)
+      : normalizeBodyString(req.body.billImage || req.body.bill_image);
+    const workDescription = normalizeBodyString(req.body.workDescription || req.body.description);
 
     if (!existingBeforeImage || !isSafeProofImage(existingBeforeImage)) {
       return res.status(400).json({ message: 'Before-work proof is required before completing this task' });
     }
 
-    if (normalizedBeforeImage && normalizedBeforeImage !== existingBeforeImage) {
-      return res.status(400).json({ message: 'Before-work proof cannot be changed during completion' });
-    }
-
     if (!normalizedAfterImage || !isSafeProofImage(normalizedAfterImage)) {
       return res.status(400).json({ message: 'A valid after-work proof image is required to complete this task' });
+    }
+
+    if (!normalizedBillImage || !isSafeProofImage(normalizedBillImage)) {
+      return res.status(400).json({ message: 'A valid bill proof image is required to complete this task' });
+    }
+
+    if (!workDescription) {
+      return res.status(400).json({ message: 'A work description is required to complete this task' });
     }
 
     complaint.status = WORKER_REVIEW_STATUS;
@@ -588,6 +622,10 @@ router.post('/update-status/:id', auth, authorize('worker', 'volunteer'), async 
     complaint.beforeImage = existingBeforeImage;
     complaint.work_proof.after_image = normalizedAfterImage;
     complaint.afterImage = normalizedAfterImage;
+    complaint.work_proof.bill_image = normalizedBillImage;
+    complaint.billImage = normalizedBillImage;
+    complaint.work_proof.description = workDescription;
+    complaint.workDescription = workDescription;
     complaint.work_proof.completed_at = new Date();
     complaint.verification = {
       status: 'pending',
@@ -607,8 +645,8 @@ router.post('/update-status/:id', auth, authorize('worker', 'volunteer'), async 
     const departmentHeadIds = await getDepartmentHeadIds(complaint.department_id);
     await createNotificationsForUsers({
       userIds: departmentHeadIds,
-      title: 'Work submitted for verification',
-      message: `After-work proof uploaded for "${complaint.title}". Please verify the work.`,
+      title: 'Task completed. Please verify.',
+      message: 'Task completed. Please verify.',
       type: 'INFO',
       complaintId: complaint._id
     });
@@ -681,8 +719,8 @@ router.post('/verify/:id', auth, authorize('head'), async (req, res) => {
       const adminIds = await getAdminIds();
       await createNotificationsForUsers({
         userIds: adminIds,
-        title: 'Work completed and verified',
-        message: `Department Head verified the work for "${complaint.title}".`,
+        title: 'Task verified.',
+        message: 'Task verified.',
         type: 'SUCCESS',
         complaintId: complaint._id
       });
@@ -692,8 +730,8 @@ router.post('/verify/:id', auth, authorize('head'), async (req, res) => {
 
     await createNotificationsForUsers({
       userIds: getAssignedUserIds(complaint),
-      title: 'Rework required',
-      message: `Work not proper, redo required for "${complaint.title}".`,
+      title: 'Task rejected. Rework required.',
+      message: 'Task rejected. Rework required.',
       type: 'ERROR',
       complaintId: complaint._id
     });
