@@ -12,6 +12,11 @@ import {
   XCircle
 } from 'lucide-react';
 import api from '../api';
+import {
+  LOCATION_TARGET_ACCURACY_METERS,
+  formatAccuracyMeters,
+  watchForAccuratePosition
+} from '../utils/geolocation';
 
 const categories = ['Road Damage', 'Garbage', 'Water Leakage', 'Street Light', 'Other'];
 
@@ -38,13 +43,13 @@ const truncateLabel = (value, maxLength = 84) => (
   value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value
 );
 
-const requestCurrentPosition = () => new Promise((resolve, reject) => {
-  navigator.geolocation.getCurrentPosition(resolve, reject, {
-    enableHighAccuracy: true,
-    timeout: 10000,
-    maximumAge: 60000
-  });
-});
+const hasAcceptedLocation = (location) => (
+  Number.isFinite(location?.lat)
+  && Number.isFinite(location?.lng)
+  && Number.isFinite(Number(location?.accuracy))
+  && Number(location.accuracy) <= LOCATION_TARGET_ACCURACY_METERS
+  && !location?.loading
+);
 
 const loadImageFromFile = (file) => new Promise((resolve, reject) => {
   const image = new Image();
@@ -124,9 +129,10 @@ const ReportIssue = () => {
   const [locationState, setLocationState] = useState({
     lat: null,
     lng: null,
+    accuracy: null,
     address: '',
     loading: true,
-    loadingLabel: 'Detecting your location...',
+    loadingLabel: 'Detecting accurate location...',
     error: ''
   });
   const [loading, setLoading] = useState(false);
@@ -134,6 +140,8 @@ const ReportIssue = () => {
   const fileInputRef = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
+  const locationAbortControllerRef = useRef(null);
+  const locationPromiseRef = useRef(null);
   const navigate = useNavigate();
 
   const stopCamera = () => {
@@ -186,36 +194,21 @@ const ReportIssue = () => {
     }));
   };
 
-  const fetchAddressForCoordinates = async (lat, lng) => {
-    updateLocationState({
-      lat,
-      lng,
-      address: '',
-      loading: true,
-      loadingLabel: 'Fetching address...',
-      error: ''
-    });
+  const cancelLocationTracking = () => {
+    if (locationAbortControllerRef.current) {
+      locationAbortControllerRef.current.abort();
+      locationAbortControllerRef.current = null;
+    }
 
-    const address = await reverseGeocodeCoordinates(lat, lng);
-    const fallbackAddress = address || formatCoordinates(lat, lng);
-
-    updateLocationState({
-      lat,
-      lng,
-      address: fallbackAddress,
-      loading: false,
-      loadingLabel: '',
-      error: ''
-    });
-
-    return fallbackAddress;
+    locationPromiseRef.current = null;
   };
 
-  const detectLocation = async () => {
+  const detectLocation = async ({ restart = false } = {}) => {
     if (!navigator.geolocation) {
       const unsupportedState = {
         lat: null,
         lng: null,
+        accuracy: null,
         address: '',
         loading: false,
         loadingLabel: '',
@@ -225,44 +218,119 @@ const ReportIssue = () => {
       return unsupportedState;
     }
 
+    if (!restart && locationPromiseRef.current) {
+      return locationPromiseRef.current;
+    }
+
+    cancelLocationTracking();
+
+    const controller = new AbortController();
+    locationAbortControllerRef.current = controller;
+
     updateLocationState({
+      lat: null,
+      lng: null,
+      accuracy: null,
+      address: '',
       loading: true,
-      loadingLabel: 'Detecting your location...',
+      loadingLabel: 'Detecting accurate location...',
       error: ''
     });
 
-    try {
-      const position = await requestCurrentPosition();
-      const { latitude, longitude } = position.coords;
-      const address = await fetchAddressForCoordinates(latitude, longitude);
+    let trackingPromise;
+    trackingPromise = (async () => {
+      try {
+        const position = await watchForAccuratePosition({
+          targetAccuracy: LOCATION_TARGET_ACCURACY_METERS,
+          signal: controller.signal,
+          onProgress: (nextPosition) => {
+            const { latitude, longitude, accuracy } = nextPosition.coords;
+            const normalizedAccuracy = Number(accuracy);
 
-      return {
-        lat: latitude,
-        lng: longitude,
-        address,
-        loading: false,
-        loadingLabel: '',
-        error: ''
-      };
-    } catch (error) {
-      const fallbackState = {
-        lat: null,
-        lng: null,
-        address: '',
-        loading: false,
-        loadingLabel: '',
-        error: error.code === error.PERMISSION_DENIED
-          ? 'Location permission was denied. You can retry or enter an address manually.'
-          : 'Unable to detect your location right now.'
-      };
+            updateLocationState({
+              lat: Number(latitude),
+              lng: Number(longitude),
+              accuracy: Number.isFinite(normalizedAccuracy) ? normalizedAccuracy : null,
+              address: '',
+              loading: true,
+              loadingLabel: 'Detecting accurate location...',
+              error: ''
+            });
+          }
+        });
 
-      setLocationState(fallbackState);
-      return fallbackState;
-    }
+        if (controller.signal.aborted) {
+          return null;
+        }
+
+        const { latitude, longitude, accuracy } = position.coords;
+        const lat = Number(latitude);
+        const lng = Number(longitude);
+        const normalizedAccuracy = Number(accuracy);
+
+        updateLocationState({
+          lat,
+          lng,
+          accuracy: Number.isFinite(normalizedAccuracy) ? normalizedAccuracy : null,
+          address: '',
+          loading: true,
+          loadingLabel: 'Fetching full address...',
+          error: ''
+        });
+
+        const address = await reverseGeocodeCoordinates(lat, lng);
+        if (controller.signal.aborted) {
+          return null;
+        }
+
+        const resolvedLocation = {
+          lat,
+          lng,
+          accuracy: Number.isFinite(normalizedAccuracy) ? normalizedAccuracy : null,
+          address: address || formatCoordinates(lat, lng),
+          loading: false,
+          loadingLabel: '',
+          error: ''
+        };
+
+        setLocationState(resolvedLocation);
+        return resolvedLocation;
+      } catch (error) {
+        if (error?.name === 'AbortError') {
+          return null;
+        }
+
+        const fallbackState = {
+          lat: null,
+          lng: null,
+          accuracy: null,
+          address: '',
+          loading: false,
+          loadingLabel: '',
+          error: error.code === error.PERMISSION_DENIED
+            ? 'Location permission was denied. You can retry or enter an address manually.'
+            : 'Unable to detect an accurate location right now.'
+        };
+
+        setLocationState(fallbackState);
+        return fallbackState;
+      } finally {
+        if (locationAbortControllerRef.current === controller) {
+          locationAbortControllerRef.current = null;
+        }
+
+        if (locationPromiseRef.current === trackingPromise) {
+          locationPromiseRef.current = null;
+        }
+      }
+    })();
+
+    locationPromiseRef.current = trackingPromise;
+    return trackingPromise;
   };
 
   const resolveLocationSnapshot = async () => {
-    if (Number.isFinite(locationState.lat) && Number.isFinite(locationState.lng)) {
+    if (hasAcceptedLocation(locationState)) {
       if (
         locationState.address
         && locationState.address !== formatCoordinates(locationState.lat, locationState.lng)
@@ -270,32 +338,35 @@ const ReportIssue = () => {
         return {
           lat: locationState.lat,
           lng: locationState.lng,
+          accuracy: locationState.accuracy,
           address: locationState.address
         };
       }
 
-      const address = await fetchAddressForCoordinates(locationState.lat, locationState.lng);
       return {
         lat: locationState.lat,
         lng: locationState.lng,
-        address
+        accuracy: locationState.accuracy,
+        address: locationState.address || formatCoordinates(locationState.lat, locationState.lng)
       };
     }
 
     const detected = await detectLocation();
-    return Number.isFinite(detected?.lat) && Number.isFinite(detected?.lng)
+    return hasAcceptedLocation(detected)
       ? detected
       : {
           lat: null,
           lng: null,
+          accuracy: null,
           address: ''
         };
   };
 
   useEffect(() => {
-    void detectLocation();
+    void detectLocation({ restart: true });
 
     return () => {
+      cancelLocationTracking();
       stopCamera();
     };
   }, []);
@@ -328,6 +399,7 @@ const ReportIssue = () => {
     setLocationState((current) => ({
       ...current,
       [key]: value === '' ? null : Number(value),
+      accuracy: null,
       error: ''
     }));
   };
@@ -619,11 +691,11 @@ const ReportIssue = () => {
             <div className="panel-heading">
               <div>
                 <h3>Location</h3>
-                <p>We request your current location automatically and convert it into a readable address.</p>
+                <p>We keep tracking your GPS until it reaches 30 meters or better, then convert it into a readable address.</p>
               </div>
-              <button type="button" className="btn" onClick={() => void detectLocation()} disabled={locationState.loading}>
+              <button type="button" className="btn" onClick={() => void detectLocation({ restart: true })}>
                 {locationState.loading ? <Loader className="spin" size={18} /> : <RefreshCw size={18} />}
-                Retry Location
+                Retry
               </button>
             </div>
 
@@ -634,18 +706,24 @@ const ReportIssue = () => {
               <div>
                 <strong>
                   {locationState.loading
-                    ? locationState.loadingLabel || 'Fetching address...'
+                    ? locationState.loadingLabel || 'Detecting accurate location...'
                     : locationState.address
                       ? formatAddressHeadline(locationState.address)
                       : 'Location not detected yet'}
                 </strong>
                 <p>
-                  {locationState.error || (
-                    Number.isFinite(locationState.lat) && Number.isFinite(locationState.lng)
-                      ? `Latitude ${locationState.lat.toFixed(5)}, Longitude ${locationState.lng.toFixed(5)}`
-                      : 'Grant location permission to attach coordinates automatically.'
-                  )}
+                  {locationState.error
+                    || (locationState.loading
+                      ? Number.isFinite(locationState.accuracy)
+                        ? `Current GPS accuracy: ${formatAccuracyMeters(locationState.accuracy)}. Waiting for ${LOCATION_TARGET_ACCURACY_METERS} m or better.`
+                        : `Waiting for GPS to reach ${LOCATION_TARGET_ACCURACY_METERS} m or better.`
+                      : Number.isFinite(locationState.lat) && Number.isFinite(locationState.lng)
+                        ? `Latitude ${locationState.lat.toFixed(5)}, Longitude ${locationState.lng.toFixed(5)}`
+                        : 'Grant location permission to attach coordinates automatically.')}
                 </p>
+                {Number.isFinite(locationState.accuracy) ? (
+                  <p className="accuracy-readout">{`Accuracy: ${formatAccuracyMeters(locationState.accuracy)}`}</p>
+                ) : null}
               </div>
             </div>
 
@@ -827,6 +905,11 @@ const ReportIssue = () => {
         .location-status p {
           color: var(--text-muted);
           margin-top: 0.3rem;
+        }
+
+        .accuracy-readout {
+          color: var(--text-main);
+          font-weight: 600;
         }
 
         .status-icon {

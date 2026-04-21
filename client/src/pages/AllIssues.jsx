@@ -28,7 +28,7 @@ const getIssueCoordinates = (issue) => {
 
 const getMarkerStatusTone = (status) => {
   if (status === 'completed') return 'completed';
-  if (['verified', 'waiting_for_verification'].includes(status)) return 'review';
+  if (['verified', 'waiting_for_head', 'waiting_for_verification'].includes(status)) return 'review';
   if (['in_progress', 'assigned_to_dept', 'assigned_to_worker', 'rework_required'].includes(status)) return 'in-progress';
   return 'pending';
 };
@@ -59,6 +59,7 @@ const getStatusLabel = (status) => {
     assigned_to_dept: 'Assigned To Department',
     assigned_to_worker: 'Assigned To Worker',
     in_progress: 'In Progress',
+    waiting_for_head: 'Waiting For Head',
     waiting_for_verification: 'Waiting For Verification',
     verified: 'Verified',
     rework_required: 'Rework Required',
@@ -413,6 +414,7 @@ const AllIssues = ({ user }) => {
         .status-indicator[data-status="assigned_to_dept"] { background: #facc15; }
         .status-indicator[data-status="assigned_to_worker"] { background: #facc15; }
         .status-indicator[data-status="in_progress"] { background: #facc15; }
+        .status-indicator[data-status="waiting_for_head"] { background: #0ea5e9; }
         .status-indicator[data-status="waiting_for_verification"] { background: #0ea5e9; }
         .status-indicator[data-status="verified"] { background: #10b981; }
         .status-indicator[data-status="rework_required"] { background: #fb7185; }
@@ -440,6 +442,7 @@ const AllIssues = ({ user }) => {
         .status-badge.assigned_to_dept { background: rgba(250, 204, 21, 0.18); color: #a16207; }
         .status-badge.assigned_to_worker { background: rgba(250, 204, 21, 0.18); color: #a16207; }
         .status-badge.in_progress { background: rgba(250, 204, 21, 0.18); color: #a16207; }
+        .status-badge.waiting_for_head { background: rgba(14, 165, 233, 0.14); color: #0369a1; }
         .status-badge.waiting_for_verification { background: rgba(14, 165, 233, 0.14); color: #0369a1; }
         .status-badge.verified { background: rgba(16, 185, 129, 0.14); color: #047857; }
         .status-badge.rework_required { background: rgba(244, 63, 94, 0.12); color: #be123c; }

@@ -84,7 +84,7 @@ const buildActivitySummary = async (user) => {
       }),
       Complaint.countDocuments({
         department_id: user.department_id,
-        status: { $in: ['assigned_to_worker', 'in_progress', 'waiting_for_verification', 'rework_required'] }
+        status: { $in: ['assigned_to_worker', 'in_progress', 'waiting_for_head', 'waiting_for_verification', 'rework_required'] }
       }),
       Complaint.countDocuments({
         department_id: user.department_id,

@@ -6,7 +6,7 @@ const { getRoleValues } = require('../utils/userAccess');
 const router = express.Router();
 
 const COMPLETED_STATUS = 'completed';
-const IN_PROGRESS_STATUSES = ['in_progress', 'waiting_for_verification', 'rework_required', 'verified'];
+const IN_PROGRESS_STATUSES = ['in_progress', 'waiting_for_head', 'waiting_for_verification', 'rework_required', 'verified'];
 const PENDING_STATUSES = ['pending', 'assigned_to_dept', 'assigned_to_worker'];
 
 const roundPercentage = (completed, total) => {

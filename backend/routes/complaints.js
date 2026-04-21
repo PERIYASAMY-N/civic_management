@@ -15,8 +15,11 @@ const PROOF_UPLOAD_DIRECTORY = path.join(__dirname, '..', 'uploads', 'proofs');
 const SAFE_IMAGE_PATTERN = /^\/uploads\/issues\/[A-Za-z0-9._-]+\.(jpg|jpeg|png)$/i;
 const SAFE_PROOF_IMAGE_PATTERN = /^\/uploads\/proofs\/[A-Za-z0-9._-]+\.(jpg|jpeg|png)$/i;
 const WORKER_STARTABLE_STATUSES = ['pending', 'assigned_to_dept', 'assigned_to_worker', 'rework_required'];
-const WORKER_REVIEW_STATUS = 'waiting_for_verification';
+const WORKER_WAITING_FOR_HEAD_STATUS = 'waiting_for_head';
+const LEGACY_WORKER_REVIEW_STATUS = 'waiting_for_verification';
+const WORKER_REVIEW_STATUSES = [WORKER_WAITING_FOR_HEAD_STATUS, LEGACY_WORKER_REVIEW_STATUS];
 const ADMIN_CLOSABLE_STATUS = 'verified';
+const LOCATION_MAX_ACCURACY_METERS = 50;
 
 const imageUpload = multer({
   storage: multer.diskStorage({
@@ -103,16 +106,27 @@ const toProofPath = (file) => (file ? `/uploads/proofs/${file.filename}` : '');
 
 const normalizeGeoDate = (value) => {
   if (!value) {
-    return new Date();
+    return null;
   }
 
   const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
 const getProofGeoInput = (body, prefix) => {
-  const lat = Number(body?.[`${prefix}Lat`]);
-  const lng = Number(body?.[`${prefix}Lng`]);
+  const nestedKey = `${prefix}Location`;
+  let nestedLocation = body?.[nestedKey];
+
+  if (typeof nestedLocation === 'string') {
+    try {
+      nestedLocation = JSON.parse(nestedLocation);
+    } catch {
+      nestedLocation = null;
+    }
+  }
+
+  const lat = Number(nestedLocation?.lat ?? body?.[`${prefix}Lat`]);
+  const lng = Number(nestedLocation?.lng ?? body?.[`${prefix}Lng`]);
 
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
     return null;
@@ -121,9 +135,25 @@ const getProofGeoInput = (body, prefix) => {
   return {
     lat,
     lng,
-    address: normalizeBodyString(body?.[`${prefix}Address`]),
-    time: normalizeGeoDate(body?.[`${prefix}Time`])
+    accuracy: Number(nestedLocation?.accuracy ?? body?.[`${prefix}Accuracy`]),
+    address: normalizeBodyString(nestedLocation?.address ?? body?.[`${prefix}Address`]),
+    time: normalizeGeoDate(nestedLocation?.timestamp ?? body?.[`${prefix}Time`])
   };
+};
+
+const isAccurateProofGeo = (geo) => {
+  const accuracy = Number(geo?.accuracy);
+  const timestamp = geo?.time instanceof Date ? geo.time : normalizeGeoDate(geo?.time);
+
+  if (!Number.isFinite(accuracy)) {
+    return false;
+  }
+
+  if (!timestamp) {
+    return false;
+  }
+
+  return accuracy <= LOCATION_MAX_ACCURACY_METERS;
 };
 
 const enrichProofGeo = async (body, prefix) => {
@@ -136,6 +166,7 @@ const enrichProofGeo = async (body, prefix) => {
   return {
     lat: input.lat,
     lng: input.lng,
+    accuracy: input.accuracy,
     address: addressFromGeo || input.address || formatCoordinates(input.lat, input.lng),
     time: input.time
   };
@@ -376,6 +407,297 @@ const getAssignedUserIds = (complaint) => ([
   complaint?.assigned_volunteer_id?.toString?.() || complaint?.assigned_volunteer_id || null
 ].filter(Boolean));
 
+const isAssignedTaskUser = (complaint, userId) => (
+  complaint.assigned_worker_id?.toString() === userId
+  || complaint.assigned_volunteer_id?.toString() === userId
+);
+
+const getBeforeWorkRecord = (complaint) => {
+  const image = complaint?.beforeWork?.image || complaint?.beforeImage || complaint?.work_proof?.before_image || '';
+  const lat = Number(complaint?.beforeWork?.lat ?? complaint?.beforeLat);
+  const lng = Number(complaint?.beforeWork?.lng ?? complaint?.beforeLng);
+  const accuracy = Number(complaint?.beforeWork?.accuracy ?? complaint?.beforeAccuracy);
+  const address = complaint?.beforeWork?.address || complaint?.beforeAddress || '';
+  const timestamp = complaint?.beforeWork?.timestamp || complaint?.beforeTime || null;
+
+  if (!image || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return null;
+  }
+
+  return {
+    image,
+    lat,
+    lng,
+    accuracy,
+    address,
+    timestamp
+  };
+};
+
+const clearAfterWorkFields = (complaint) => {
+  complaint.afterWork = undefined;
+  complaint.afterImage = undefined;
+  complaint.billImage = undefined;
+  complaint.workDescription = '';
+  complaint.billLat = undefined;
+  complaint.billLng = undefined;
+  complaint.billAccuracy = undefined;
+  complaint.billAddress = '';
+  complaint.billTime = undefined;
+  complaint.afterLat = undefined;
+  complaint.afterLng = undefined;
+  complaint.afterAccuracy = undefined;
+  complaint.afterAddress = '';
+  complaint.afterTime = undefined;
+};
+
+const saveBeforeWorkData = (complaint, beforeWork) => {
+  complaint.beforeWork = {
+    image: beforeWork.image,
+    lat: beforeWork.lat,
+    lng: beforeWork.lng,
+    accuracy: beforeWork.accuracy,
+    address: beforeWork.address,
+    timestamp: beforeWork.timestamp
+  };
+  complaint.work_proof = complaint.work_proof || {};
+  complaint.work_proof.before_image = beforeWork.image;
+  complaint.work_proof.after_image = undefined;
+  complaint.work_proof.bill_image = undefined;
+  complaint.work_proof.description = undefined;
+  complaint.work_proof.completed_at = undefined;
+  complaint.beforeImage = beforeWork.image;
+  complaint.beforeLat = beforeWork.lat;
+  complaint.beforeLng = beforeWork.lng;
+  complaint.beforeAccuracy = beforeWork.accuracy;
+  complaint.beforeAddress = beforeWork.address;
+  complaint.beforeTime = beforeWork.timestamp;
+  clearAfterWorkFields(complaint);
+  complaint.verification = {
+    status: 'pending',
+    verified_by: undefined,
+    verified_at: undefined,
+    comments: ''
+  };
+};
+
+const saveAfterWorkData = (complaint, afterWork) => {
+  complaint.afterWork = {
+    image: afterWork.image,
+    billImage: afterWork.billImage,
+    description: afterWork.description,
+    lat: afterWork.lat,
+    lng: afterWork.lng,
+    accuracy: afterWork.accuracy,
+    address: afterWork.address,
+    timestamp: afterWork.timestamp,
+    billLat: afterWork.billLat,
+    billLng: afterWork.billLng,
+    billAccuracy: afterWork.billAccuracy,
+    billAddress: afterWork.billAddress,
+    billTimestamp: afterWork.billTimestamp
+  };
+  complaint.work_proof = complaint.work_proof || {};
+  complaint.work_proof.before_image = getBeforeWorkRecord(complaint)?.image || complaint.beforeImage || complaint.work_proof.before_image;
+  complaint.work_proof.after_image = afterWork.image;
+  complaint.work_proof.bill_image = afterWork.billImage;
+  complaint.work_proof.description = afterWork.description;
+  complaint.work_proof.completed_at = new Date();
+  complaint.afterImage = afterWork.image;
+  complaint.billImage = afterWork.billImage;
+  complaint.workDescription = afterWork.description;
+  complaint.afterLat = afterWork.lat;
+  complaint.afterLng = afterWork.lng;
+  complaint.afterAccuracy = afterWork.accuracy;
+  complaint.afterAddress = afterWork.address;
+  complaint.afterTime = afterWork.timestamp;
+  complaint.billLat = afterWork.billLat;
+  complaint.billLng = afterWork.billLng;
+  complaint.billAccuracy = afterWork.billAccuracy;
+  complaint.billAddress = afterWork.billAddress;
+  complaint.billTime = afterWork.billTimestamp;
+  complaint.verification = {
+    status: 'pending',
+    verified_by: undefined,
+    verified_at: undefined,
+    comments: ''
+  };
+};
+
+const submitBeforeWork = async (req, res) => {
+  try {
+    await runUpload(proofUpload.fields(WORKER_PROOF_FIELDS), req, res);
+
+    const complaint = await Complaint.findById(req.params.id);
+    if (!complaint) {
+      return res.status(404).json({ message: 'Task not found' });
+    }
+
+    if (!isAssignedTaskUser(complaint, req.user.id)) {
+      return res.status(403).json({ message: 'Not assigned to this task' });
+    }
+
+    if (!WORKER_STARTABLE_STATUSES.includes(complaint.status)) {
+      return res.status(400).json({ message: 'This task is not ready for before-work submission right now' });
+    }
+
+    const beforeUpload = getUploadedFile(req.files, ['beforeImageFile', 'proofImage']);
+    const beforeImage = beforeUpload
+      ? toProofPath(beforeUpload)
+      : normalizeBodyString(req.body.beforeImage || req.body.before_image);
+    const beforeGeo = await enrichProofGeo(req.body, 'before');
+
+    if (!beforeImage || !isSafeProofImage(beforeImage)) {
+      return res.status(400).json({ message: 'A valid before-work image is required' });
+    }
+
+    if (!beforeGeo) {
+      return res.status(400).json({ message: 'Valid before-work location is required' });
+    }
+
+    if (!isAccurateProofGeo(beforeGeo)) {
+      return res.status(400).json({ message: 'Location not accurate. Try again.' });
+    }
+
+    const previousStatus = complaint.status;
+    saveBeforeWorkData(complaint, {
+      image: beforeImage,
+      lat: beforeGeo.lat,
+      lng: beforeGeo.lng,
+      accuracy: beforeGeo.accuracy,
+      address: beforeGeo.address,
+      timestamp: beforeGeo.time
+    });
+    complaint.status = 'in_progress';
+    complaint.timeline.push({
+      status: 'in_progress',
+      updated_by: req.user.id,
+      comments: previousStatus === 'rework_required'
+        ? 'Worker resubmitted before-work proof and restarted the task'
+        : 'Worker submitted before-work proof and started the task'
+    });
+
+    await complaint.save();
+    await notifyCitizen(complaint, 'in_progress');
+    await createNotificationsForUsers({
+      userIds: await getDepartmentHeadIds(complaint.department_id),
+      title: 'Worker started the task',
+      message: 'Worker started the task',
+      type: 'INFO',
+      complaintId: complaint._id
+    });
+
+    return res.json({
+      message: 'Before work submitted successfully',
+      complaint
+    });
+  } catch (err) {
+    return res.status(err.status || 500).json({ message: err.message || 'Server error' });
+  }
+};
+
+const submitAfterWork = async (req, res) => {
+  try {
+    await runUpload(proofUpload.fields(WORKER_PROOF_FIELDS), req, res);
+
+    const complaint = await Complaint.findById(req.params.id);
+    if (!complaint) {
+      return res.status(404).json({ message: 'Task not found' });
+    }
+
+    if (!isAssignedTaskUser(complaint, req.user.id)) {
+      return res.status(403).json({ message: 'Not assigned to this task' });
+    }
+
+    if (complaint.status !== 'in_progress') {
+      return res.status(400).json({ message: 'After-work submission is allowed only for in-progress tasks' });
+    }
+
+    const beforeWork = getBeforeWorkRecord(complaint);
+    if (!beforeWork || !isSafeProofImage(beforeWork.image)) {
+      return res.status(400).json({ message: 'Before work must be submitted before after-work proof' });
+    }
+
+    const afterUpload = getUploadedFile(req.files, ['afterImageFile', 'proofImage']);
+    const billUpload = getUploadedFile(req.files, ['billImageFile']);
+    const afterImage = afterUpload
+      ? toProofPath(afterUpload)
+      : normalizeBodyString(req.body.afterImage || req.body.after_image);
+    const billImage = billUpload
+      ? toProofPath(billUpload)
+      : normalizeBodyString(req.body.billImage || req.body.bill_image);
+    const description = normalizeBodyString(req.body.workDescription || req.body.description);
+    const afterGeo = await enrichProofGeo(req.body, 'after');
+    const billGeo = await enrichProofGeo(req.body, 'bill');
+
+    if (!afterImage || !isSafeProofImage(afterImage)) {
+      return res.status(400).json({ message: 'A valid after-work image is required' });
+    }
+
+    if (!billImage || !isSafeProofImage(billImage)) {
+      return res.status(400).json({ message: 'A valid bill copy image is required' });
+    }
+
+    if (!description) {
+      return res.status(400).json({ message: 'A work description is required' });
+    }
+
+    if (!afterGeo) {
+      return res.status(400).json({ message: 'Valid after-work location is required' });
+    }
+
+    if (!isAccurateProofGeo(afterGeo)) {
+      return res.status(400).json({ message: 'Location not accurate. Try again.' });
+    }
+
+    if (billGeo && !isAccurateProofGeo(billGeo)) {
+      return res.status(400).json({ message: 'Location not accurate. Try again.' });
+    }
+
+    const finalBillGeo = billGeo || afterGeo;
+
+    saveAfterWorkData(complaint, {
+      image: afterImage,
+      billImage,
+      description,
+      lat: afterGeo.lat,
+      lng: afterGeo.lng,
+      accuracy: afterGeo.accuracy,
+      address: afterGeo.address,
+      timestamp: afterGeo.time,
+      billLat: finalBillGeo.lat,
+      billLng: finalBillGeo.lng,
+      billAccuracy: finalBillGeo.accuracy,
+      billAddress: finalBillGeo.address,
+      billTimestamp: finalBillGeo.time
+    });
+    complaint.status = 'completed';
+    complaint.timeline.push({
+      status: 'completed',
+      updated_by: req.user.id,
+      comments: 'Worker completed the task and submitted after-work proof with bill'
+    });
+
+    await complaint.save();
+
+    const departmentHeadIds = await getDepartmentHeadIds(complaint.department_id);
+    await createNotificationsForUsers({
+      userIds: departmentHeadIds,
+      title: 'Worker completed the task',
+      message: 'Worker completed the task',
+      type: 'INFO',
+      complaintId: complaint._id
+    });
+
+    return res.json({
+      message: 'After work submitted successfully',
+      complaint
+    });
+  } catch (err) {
+    return res.status(err.status || 500).json({ message: err.message || 'Server error' });
+  }
+};
+
 // Create Complaint
 router.post('/', auth, imageUpload.single('imageFile'), async (req, res) => {
   try {
@@ -530,8 +852,8 @@ router.post('/assign/:id', auth, authorize('head'), async (req, res) => {
     if (assigneeId) {
       await createNotification({
         userId: assigneeId,
-        title: 'New assignment',
-        message: `New task assigned: ${complaint.title}`,
+        title: 'New Task Assigned',
+        message: 'New Task Assigned',
         type: 'ASSIGNMENT',
         complaintId: complaint._id
       });
@@ -545,194 +867,22 @@ router.post('/assign/:id', auth, authorize('head'), async (req, res) => {
   }
 });
 
-// Start Work (Worker/Volunteer Only)
-router.post('/start-work/:id', auth, authorize('worker', 'volunteer'), async (req, res) => {
-  try {
-    await runUpload(proofUpload.fields(WORKER_PROOF_FIELDS), req, res);
-
-    const complaint = await Complaint.findById(req.params.id);
-    if (!complaint) return res.status(404).json({ message: 'Complaint not found' });
-
-    if (complaint.assigned_worker_id?.toString() !== req.user.id
-      && complaint.assigned_volunteer_id?.toString() !== req.user.id) {
-      return res.status(403).json({ message: 'Not assigned to this task' });
-    }
-
-    if (!WORKER_STARTABLE_STATUSES.includes(complaint.status)) {
-       return res.status(400).json({ message: 'This task is not ready to start right now' });
-    }
-
-    const beforeUpload = getUploadedFile(req.files, ['beforeImageFile', 'proofImage']);
-    const before_image = beforeUpload
-      ? toProofPath(beforeUpload)
-      : normalizeBodyString(req.body.beforeImage || req.body.before_image);
-    const beforeGeo = await enrichProofGeo(req.body, 'before');
-
-    if (!before_image || !isSafeProofImage(before_image)) {
-      return res.status(400).json({ message: 'A valid before-work proof image is required to start work' });
-    }
-
-    if (!beforeGeo) {
-      return res.status(400).json({ message: 'Location access required' });
-    }
-
-    const previousStatus = complaint.status;
-
-    complaint.status = 'in_progress';
-    complaint.work_proof = complaint.work_proof || {};
-    complaint.work_proof.before_image = before_image;
-    complaint.work_proof.after_image = undefined;
-    complaint.work_proof.bill_image = undefined;
-    complaint.work_proof.description = undefined;
-    complaint.work_proof.completed_at = undefined;
-    complaint.beforeImage = before_image;
-    complaint.afterImage = undefined;
-    complaint.billImage = undefined;
-    complaint.workDescription = '';
-    complaint.billLat = undefined;
-    complaint.billLng = undefined;
-    complaint.billAddress = '';
-    complaint.billTime = undefined;
-    complaint.beforeLat = beforeGeo.lat;
-    complaint.beforeLng = beforeGeo.lng;
-    complaint.beforeAddress = beforeGeo.address;
-    complaint.beforeTime = beforeGeo.time;
-    complaint.afterLat = undefined;
-    complaint.afterLng = undefined;
-    complaint.afterAddress = '';
-    complaint.afterTime = undefined;
-    complaint.verification = {
-      status: 'pending',
-      verified_by: undefined,
-      verified_at: undefined,
-      comments: ''
-    };
-    complaint.timeline.push({
-      status: 'in_progress',
-      updated_by: req.user.id,
-      comments: previousStatus === 'rework_required'
-        ? 'Worker restarted the task with a fresh before-work proof image'
-        : 'Worker started work on the site with before-work proof'
-    });
-
-    await complaint.save();
-    await notifyCitizen(complaint, 'in_progress');
-    res.json({ message: 'Work started', complaint });
-  } catch (err) {
-    res.status(err.status || 500).json({ message: err.message || 'Server error' });
-  }
-});
-
-// Update Status & Proof (Worker/Volunteer Only)
-router.post('/update-status/:id', auth, authorize('worker', 'volunteer'), async (req, res) => {
-  try {
-    await runUpload(proofUpload.fields(WORKER_PROOF_FIELDS), req, res);
-
-    const { status, comments } = req.body;
-    const complaint = await Complaint.findById(req.params.id);
-    if (!complaint) return res.status(404).json({ message: 'Complaint not found' });
-
-    // Check if assigned to this user
-    if (complaint.assigned_worker_id?.toString() !== req.user.id && 
-        complaint.assigned_volunteer_id?.toString() !== req.user.id) {
-      return res.status(403).json({ message: 'Not assigned to this task' });
-    }
-
-    if (status && !['completed', WORKER_REVIEW_STATUS].includes(status)) {
-      return res.status(400).json({ message: 'Workers can only submit in-progress tasks for verification' });
-    }
-
-    if (complaint.status !== 'in_progress') {
-      return res.status(400).json({ message: 'Only in-progress tasks can be completed' });
-    }
-
-    const existingBeforeImage = complaint.beforeImage || complaint.work_proof?.before_image || '';
-    const afterUpload = getUploadedFile(req.files, ['afterImageFile', 'proofImage']);
-    const billUpload = getUploadedFile(req.files, ['billImageFile']);
-    const normalizedAfterImage = afterUpload
-      ? toProofPath(afterUpload)
-      : normalizeBodyString(req.body.afterImage || req.body.after_image);
-    const normalizedBillImage = billUpload
-      ? toProofPath(billUpload)
-      : normalizeBodyString(req.body.billImage || req.body.bill_image);
-    const workDescription = normalizeBodyString(req.body.workDescription || req.body.description);
-    const afterGeo = await enrichProofGeo(req.body, 'after');
-    const billGeo = await enrichProofGeo(req.body, 'bill');
-
-    if (!existingBeforeImage || !isSafeProofImage(existingBeforeImage)) {
-      return res.status(400).json({ message: 'Before-work proof is required before completing this task' });
-    }
-
-    if (!normalizedAfterImage || !isSafeProofImage(normalizedAfterImage)) {
-      return res.status(400).json({ message: 'A valid after-work proof image is required to complete this task' });
-    }
-
-    if (!normalizedBillImage || !isSafeProofImage(normalizedBillImage)) {
-      return res.status(400).json({ message: 'A valid bill proof image is required to complete this task' });
-    }
-
-    if (!workDescription) {
-      return res.status(400).json({ message: 'A work description is required to complete this task' });
-    }
-
-    if (!afterGeo || !billGeo) {
-      return res.status(400).json({ message: 'Location access required' });
-    }
-
-    complaint.status = WORKER_REVIEW_STATUS;
-    complaint.work_proof = complaint.work_proof || {};
-    complaint.work_proof.before_image = existingBeforeImage;
-    complaint.beforeImage = existingBeforeImage;
-    complaint.work_proof.after_image = normalizedAfterImage;
-    complaint.afterImage = normalizedAfterImage;
-    complaint.work_proof.bill_image = normalizedBillImage;
-    complaint.billImage = normalizedBillImage;
-    complaint.work_proof.description = workDescription;
-    complaint.workDescription = workDescription;
-    complaint.work_proof.completed_at = new Date();
-    complaint.afterLat = afterGeo.lat;
-    complaint.afterLng = afterGeo.lng;
-    complaint.afterAddress = afterGeo.address;
-    complaint.afterTime = afterGeo.time;
-    complaint.billLat = billGeo.lat;
-    complaint.billLng = billGeo.lng;
-    complaint.billAddress = billGeo.address;
-    complaint.billTime = billGeo.time;
-    complaint.verification = {
-      status: 'pending',
-      verified_by: undefined,
-      verified_at: undefined,
-      comments: ''
-    };
-
-    complaint.timeline.push({
-      status: WORKER_REVIEW_STATUS,
-      updated_by: req.user.id,
-      comments: comments?.trim() || 'Worker submitted after-work proof and sent the task for department verification'
-    });
-
-    await complaint.save();
-
-    const departmentHeadIds = await getDepartmentHeadIds(complaint.department_id);
-    await createNotificationsForUsers({
-      userIds: departmentHeadIds,
-      title: 'Task completed. Please verify.',
-      message: 'Task completed. Please verify.',
-      type: 'INFO',
-      complaintId: complaint._id
-    });
-
-    res.json({ message: 'Work submitted for verification', complaint });
-  } catch (err) {
-    res.status(err.status || 500).json({ message: err.message || 'Server error' });
-  }
-});
+router.patch('/:id/before', auth, authorize('worker', 'volunteer'), submitBeforeWork);
+router.post('/:id/before', auth, authorize('worker', 'volunteer'), submitBeforeWork);
+router.patch('/tasks/:id/before', auth, authorize('worker', 'volunteer'), submitBeforeWork);
+router.post('/tasks/:id/before', auth, authorize('worker', 'volunteer'), submitBeforeWork);
+router.post('/start-work/:id', auth, authorize('worker', 'volunteer'), submitBeforeWork);
+router.patch('/:id/after', auth, authorize('worker', 'volunteer'), submitAfterWork);
+router.post('/:id/after', auth, authorize('worker', 'volunteer'), submitAfterWork);
+router.patch('/tasks/:id/after', auth, authorize('worker', 'volunteer'), submitAfterWork);
+router.post('/tasks/:id/after', auth, authorize('worker', 'volunteer'), submitAfterWork);
+router.post('/update-status/:id', auth, authorize('worker', 'volunteer'), submitAfterWork);
 
 router.get('/verification-queue', auth, authorize('head'), async (req, res) => {
   try {
     const issues = await Complaint.find({
       department_id: req.user.department_id,
-      status: WORKER_REVIEW_STATUS
+      status: { $in: WORKER_REVIEW_STATUSES }
     })
       .populate('assigned_worker_id', 'name')
       .populate('assigned_volunteer_id', 'name')
@@ -758,8 +908,8 @@ router.post('/verify/:id', auth, authorize('head'), async (req, res) => {
       return res.status(403).json({ message: 'You can only verify work from your own department' });
     }
 
-    if (complaint.status !== WORKER_REVIEW_STATUS) {
-      return res.status(400).json({ message: 'Only issues waiting for verification can be reviewed' });
+    if (!WORKER_REVIEW_STATUSES.includes(complaint.status)) {
+      return res.status(400).json({ message: 'Only tasks waiting for department head review can be reviewed' });
     }
 
     if (!['approve', 'reject'].includes(action)) {
@@ -790,8 +940,8 @@ router.post('/verify/:id', auth, authorize('head'), async (req, res) => {
       const adminIds = await getAdminIds();
       await createNotificationsForUsers({
         userIds: adminIds,
-        title: 'Task verified.',
-        message: 'Task verified.',
+        title: 'Task verified with bill',
+        message: 'Task verified with bill',
         type: 'SUCCESS',
         complaintId: complaint._id
       });

@@ -127,7 +127,7 @@ router.get('/department-stats', auth, authorize('admin'), async (req, res) => {
           },
           inProgress: { 
             $size: { 
-              $filter: { input: "$issues", as: "i", cond: { $in: ["$$i.status", ["in_progress", "waiting_for_verification", "rework_required"]] } } 
+              $filter: { input: "$issues", as: "i", cond: { $in: ["$$i.status", ["in_progress", "waiting_for_head", "waiting_for_verification", "rework_required"]] } } 
             } 
           },
           completed: { 
@@ -174,7 +174,7 @@ router.get('/dashboard-stats', auth, authorize('admin'), async (req, res) => {
 
     issueStats.forEach(s => {
       if (['pending', 'assigned_to_dept', 'assigned_to_worker'].includes(s._id)) stats.pending += s.count;
-      if (['in_progress', 'waiting_for_verification', 'rework_required'].includes(s._id)) stats.in_progress += s.count;
+      if (['in_progress', 'waiting_for_head', 'waiting_for_verification', 'rework_required'].includes(s._id)) stats.in_progress += s.count;
       if (s._id === 'verified') stats.verified = s.count;
       if (s._id === 'completed') stats.completed = s.count;
     });

@@ -17,6 +17,7 @@ const getStatusLabel = (status) => {
     assigned_to_dept: 'Assigned To Department',
     assigned_to_worker: 'Assigned To Worker',
     in_progress: 'In Progress',
+    waiting_for_head: 'Waiting For Head',
     waiting_for_verification: 'Waiting For Verification',
     verified: 'Verified',
     rework_required: 'Rework Required',

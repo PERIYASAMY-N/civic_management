@@ -220,7 +220,7 @@ const DepartmentAssignments = () => {
                           <p>{issue.workDescription || issue.work_proof?.description || 'No work description provided.'}</p>
                           <p>{issue.assigned_worker_id?.name || 'Worker not assigned yet'}</p>
                         </div>
-                        <span className={`status-badge ${issue.status}`}>Waiting Verification</span>
+                        <span className={`status-badge ${issue.status}`}>Waiting For Head</span>
                       </div>
 
                       <div className="meta-line">
