@@ -6,20 +6,30 @@ const path = require('path');
 const Complaint = require('../models/Complaint');
 const Notification = require('../models/Notification');
 const User = require('../models/User');
+const upload = require('../middleware/upload');
 const { auth, authorize } = require('../middleware/auth');
 const { getRoleValues, getStatusValues, hasRole, hasStatus } = require('../utils/userAccess');
 const { reverseGeocodeCoordinates } = require('../utils/geocoding');
 
 const ISSUE_UPLOAD_DIRECTORY = path.join(__dirname, '..', 'uploads', 'issues');
 const PROOF_UPLOAD_DIRECTORY = path.join(__dirname, '..', 'uploads', 'proofs');
+const TASK_UPLOAD_DIRECTORY = path.join(__dirname, '..', 'uploads', 'tasks');
 const SAFE_IMAGE_PATTERN = /^\/uploads\/issues\/[A-Za-z0-9._-]+\.(jpg|jpeg|png)$/i;
-const SAFE_PROOF_IMAGE_PATTERN = /^\/uploads\/proofs\/[A-Za-z0-9._-]+\.(jpg|jpeg|png)$/i;
+const SAFE_PROOF_IMAGE_PATTERN = /^\/uploads\/proofs\/[A-Za-z0-9._-]+\.(jpg|jpeg|png|webp)$/i;
+const SAFE_TASK_IMAGE_PATTERN = /^\/uploads\/tasks\/[A-Za-z0-9._-]+\.(jpg|jpeg|png|webp)$/i;
 const WORKER_STARTABLE_STATUSES = ['pending', 'assigned_to_dept', 'assigned_to_worker', 'rework_required'];
 const WORKER_WAITING_FOR_HEAD_STATUS = 'waiting_for_head';
 const LEGACY_WORKER_REVIEW_STATUS = 'waiting_for_verification';
 const WORKER_REVIEW_STATUSES = [WORKER_WAITING_FOR_HEAD_STATUS, LEGACY_WORKER_REVIEW_STATUS];
 const ADMIN_CLOSABLE_STATUS = 'verified';
-const LOCATION_MAX_ACCURACY_METERS = 50;
+const LOCATION_MAX_ACCURACY_METERS = 200;
+const TASK_POPULATION = [
+  ['created_by', 'name'],
+  ['department_id', 'name department_id'],
+  ['assigned_worker_id', 'name'],
+  ['assigned_volunteer_id', 'name'],
+  ['timeline.updated_by', 'name role']
+];
 
 const imageUpload = multer({
   storage: multer.diskStorage({
@@ -57,22 +67,26 @@ const proofUpload = multer({
   }),
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const allowedMimeTypes = new Set(['image/jpeg', 'image/jpg', 'image/png']);
+    const allowedMimeTypes = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp']);
     const extension = path.extname(file.originalname || '').toLowerCase();
 
-    if (String(file.mimetype || '').startsWith('image/') && allowedMimeTypes.has(String(file.mimetype || '').toLowerCase()) && ['.jpg', '.jpeg', '.png'].includes(extension || '.jpg')) {
+    if (String(file.mimetype || '').startsWith('image/') && allowedMimeTypes.has(String(file.mimetype || '').toLowerCase()) && ['.jpg', '.jpeg', '.png', '.webp'].includes(extension || '.jpg')) {
       return cb(null, true);
     }
 
-    cb(new Error('Only JPG, JPEG, and PNG images are allowed'));
+    cb(new Error('Only JPG, JPEG, PNG, and WEBP images are allowed'));
   }
 });
 
 const WORKER_PROOF_FIELDS = [
+  { name: 'beforeImage', maxCount: 1 },
   { name: 'beforeImageFile', maxCount: 1 },
   { name: 'afterImageFile', maxCount: 1 },
   { name: 'billImageFile', maxCount: 1 },
-  { name: 'proofImage', maxCount: 1 }
+  { name: 'proofImage', maxCount: 1 },
+  { name: 'image', maxCount: 1 },
+  { name: 'afterImage', maxCount: 1 },
+  { name: 'billImage', maxCount: 1 }
 ];
 
 const runUpload = (middleware, req, res) => new Promise((resolve, reject) => {
@@ -102,7 +116,16 @@ const getUploadedFile = (files, fieldNames) => {
 
 const normalizeBodyString = (value) => (typeof value === 'string' ? value.trim() : '');
 
-const toProofPath = (file) => (file ? `/uploads/proofs/${file.filename}` : '');
+const toUploadedPath = (file) => {
+  if (!file?.filename) {
+    return '';
+  }
+
+  const directoryName = path.basename(file.destination || '');
+  return directoryName
+    ? `/uploads/${directoryName}/${file.filename}`
+    : '';
+};
 
 const normalizeGeoDate = (value) => {
   if (!value) {
@@ -125,8 +148,16 @@ const getProofGeoInput = (body, prefix) => {
     }
   }
 
-  const lat = Number(nestedLocation?.lat ?? body?.[`${prefix}Lat`]);
-  const lng = Number(nestedLocation?.lng ?? body?.[`${prefix}Lng`]);
+  const lat = Number(
+    nestedLocation?.lat
+    ?? body?.[`${prefix}Lat`]
+    ?? body?.lat
+  );
+  const lng = Number(
+    nestedLocation?.lng
+    ?? body?.[`${prefix}Lng`]
+    ?? body?.lng
+  );
 
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
     return null;
@@ -135,9 +166,22 @@ const getProofGeoInput = (body, prefix) => {
   return {
     lat,
     lng,
-    accuracy: Number(nestedLocation?.accuracy ?? body?.[`${prefix}Accuracy`]),
-    address: normalizeBodyString(nestedLocation?.address ?? body?.[`${prefix}Address`]),
-    time: normalizeGeoDate(nestedLocation?.timestamp ?? body?.[`${prefix}Time`])
+    accuracy: Number(
+      nestedLocation?.accuracy
+      ?? body?.[`${prefix}Accuracy`]
+      ?? body?.accuracy
+    ),
+    address: normalizeBodyString(
+      nestedLocation?.address
+      ?? body?.[`${prefix}Address`]
+      ?? body?.address
+    ),
+    time: normalizeGeoDate(
+      nestedLocation?.timestamp
+      ?? body?.[`${prefix}Time`]
+      ?? body?.submittedAt
+      ?? body?.timestamp
+    )
   };
 };
 
@@ -343,16 +387,17 @@ const isSafeProofImage = (imagePath) => {
     return false;
   }
 
-  if (!(SAFE_IMAGE_PATTERN.test(imagePath) || SAFE_PROOF_IMAGE_PATTERN.test(imagePath))) {
+  if (!(SAFE_IMAGE_PATTERN.test(imagePath) || SAFE_PROOF_IMAGE_PATTERN.test(imagePath) || SAFE_TASK_IMAGE_PATTERN.test(imagePath))) {
     return false;
   }
 
   const normalizedRelativePath = imagePath.replace(/^\/uploads\//, '').replace(/\//g, path.sep);
   const resolvedPath = path.resolve(path.join(__dirname, '..', 'uploads', normalizedRelativePath));
-  const proofsDirectory = path.join(__dirname, '..', 'uploads', 'proofs');
+  const proofsDirectory = PROOF_UPLOAD_DIRECTORY;
+  const tasksDirectory = TASK_UPLOAD_DIRECTORY;
 
   return (
-    (resolvedPath.startsWith(ISSUE_UPLOAD_DIRECTORY) || resolvedPath.startsWith(proofsDirectory))
+    (resolvedPath.startsWith(ISSUE_UPLOAD_DIRECTORY) || resolvedPath.startsWith(proofsDirectory) || resolvedPath.startsWith(tasksDirectory))
     && fs.existsSync(resolvedPath)
   );
 };
@@ -407,18 +452,33 @@ const getAssignedUserIds = (complaint) => ([
   complaint?.assigned_volunteer_id?.toString?.() || complaint?.assigned_volunteer_id || null
 ].filter(Boolean));
 
-const isAssignedTaskUser = (complaint, userId) => (
-  complaint.assigned_worker_id?.toString() === userId
-  || complaint.assigned_volunteer_id?.toString() === userId
-);
+const isAssignedTaskUser = (complaint, userId) => {
+  const normalizedUserId = String(userId || '');
+  return (
+    complaint.assigned_worker_id?.toString() === normalizedUserId
+    || complaint.assigned_volunteer_id?.toString() === normalizedUserId
+  );
+};
+
+const populateTaskQuery = (query) => {
+  let nextQuery = query;
+
+  for (const [pathValue, selectValue] of TASK_POPULATION) {
+    nextQuery = nextQuery.populate(pathValue, selectValue);
+  }
+
+  return nextQuery;
+};
+
+const loadTaskForResponse = (taskId) => populateTaskQuery(Complaint.findById(taskId));
 
 const getBeforeWorkRecord = (complaint) => {
   const image = complaint?.beforeWork?.image || complaint?.beforeImage || complaint?.work_proof?.before_image || '';
-  const lat = Number(complaint?.beforeWork?.lat ?? complaint?.beforeLat);
-  const lng = Number(complaint?.beforeWork?.lng ?? complaint?.beforeLng);
+  const lat = Number(complaint?.beforeWork?.location?.lat ?? complaint?.beforeWork?.lat ?? complaint?.beforeLat);
+  const lng = Number(complaint?.beforeWork?.location?.lng ?? complaint?.beforeWork?.lng ?? complaint?.beforeLng);
   const accuracy = Number(complaint?.beforeWork?.accuracy ?? complaint?.beforeAccuracy);
-  const address = complaint?.beforeWork?.address || complaint?.beforeAddress || '';
-  const timestamp = complaint?.beforeWork?.timestamp || complaint?.beforeTime || null;
+  const address = complaint?.beforeWork?.location?.address || complaint?.beforeWork?.address || complaint?.beforeAddress || '';
+  const timestamp = complaint?.beforeWork?.submittedAt || complaint?.beforeWork?.timestamp || complaint?.beforeTime || null;
 
   if (!image || !Number.isFinite(lat) || !Number.isFinite(lng)) {
     return null;
@@ -454,6 +514,12 @@ const clearAfterWorkFields = (complaint) => {
 const saveBeforeWorkData = (complaint, beforeWork) => {
   complaint.beforeWork = {
     image: beforeWork.image,
+    location: {
+      lat: beforeWork.lat,
+      lng: beforeWork.lng,
+      address: beforeWork.address
+    },
+    submittedAt: beforeWork.timestamp,
     lat: beforeWork.lat,
     lng: beforeWork.lng,
     accuracy: beforeWork.accuracy,
@@ -486,6 +552,12 @@ const saveAfterWorkData = (complaint, afterWork) => {
     image: afterWork.image,
     billImage: afterWork.billImage,
     description: afterWork.description,
+    location: {
+      lat: afterWork.lat,
+      lng: afterWork.lng,
+      address: afterWork.address
+    },
+    submittedAt: afterWork.timestamp,
     lat: afterWork.lat,
     lng: afterWork.lng,
     accuracy: afterWork.accuracy,
@@ -526,37 +598,44 @@ const saveAfterWorkData = (complaint, afterWork) => {
 
 const submitBeforeWork = async (req, res) => {
   try {
-    await runUpload(proofUpload.fields(WORKER_PROOF_FIELDS), req, res);
+    console.log('BODY:', req.body);
+    console.log('FILE:', req.file);
+    console.log('FILES:', req.files);
+    console.log('TASK ID:', req.params.id);
 
     const complaint = await Complaint.findById(req.params.id);
     if (!complaint) {
-      return res.status(404).json({ message: 'Task not found' });
+      return res.status(404).json({ success: false, message: 'Task not found' });
     }
 
     if (!isAssignedTaskUser(complaint, req.user.id)) {
-      return res.status(403).json({ message: 'Not assigned to this task' });
+      return res.status(403).json({ success: false, message: 'Not assigned to this task' });
     }
 
     if (!WORKER_STARTABLE_STATUSES.includes(complaint.status)) {
-      return res.status(400).json({ message: 'This task is not ready for before-work submission right now' });
+      return res.status(400).json({ success: false, message: 'This task is not ready for before-work submission right now' });
     }
 
-    const beforeUpload = getUploadedFile(req.files, ['beforeImageFile', 'proofImage']);
+    const beforeUpload = req.file || getUploadedFile(req.files, ['beforeImage', 'beforeImageFile', 'proofImage', 'image']);
     const beforeImage = beforeUpload
-      ? toProofPath(beforeUpload)
-      : normalizeBodyString(req.body.beforeImage || req.body.before_image);
+      ? toUploadedPath(beforeUpload)
+      : normalizeBodyString(req.body.beforeImage || req.body.before_image || req.body.image);
     const beforeGeo = await enrichProofGeo(req.body, 'before');
 
     if (!beforeImage || !isSafeProofImage(beforeImage)) {
-      return res.status(400).json({ message: 'A valid before-work image is required' });
+      return res.status(400).json({ success: false, message: 'A valid before-work image is required' });
     }
 
     if (!beforeGeo) {
-      return res.status(400).json({ message: 'Valid before-work location is required' });
+      return res.status(400).json({ success: false, message: 'Valid before-work location is required' });
+    }
+
+    if (!normalizeBodyString(beforeGeo.address)) {
+      return res.status(400).json({ success: false, message: 'A readable before-work address is required' });
     }
 
     if (!isAccurateProofGeo(beforeGeo)) {
-      return res.status(400).json({ message: 'Location not accurate. Try again.' });
+      return res.status(400).json({ success: false, message: 'Move to open area for accurate GPS' });
     }
 
     const previousStatus = complaint.status;
@@ -578,6 +657,7 @@ const submitBeforeWork = async (req, res) => {
     });
 
     await complaint.save();
+    const task = await loadTaskForResponse(complaint._id);
     await notifyCitizen(complaint, 'in_progress');
     await createNotificationsForUsers({
       userIds: await getDepartmentHeadIds(complaint.department_id),
@@ -588,11 +668,17 @@ const submitBeforeWork = async (req, res) => {
     });
 
     return res.json({
-      message: 'Before work submitted successfully',
-      complaint
+      success: true,
+      message: 'Before work submitted',
+      complaint: task,
+      task
     });
-  } catch (err) {
-    return res.status(err.status || 500).json({ message: err.message || 'Server error' });
+  } catch (error) {
+    console.error('[submitBeforeWork] failed', error);
+    return res.status(error.status || 500).json({
+      success: false,
+      message: error.message || 'Server error'
+    });
   }
 };
 
@@ -618,13 +704,13 @@ const submitAfterWork = async (req, res) => {
       return res.status(400).json({ message: 'Before work must be submitted before after-work proof' });
     }
 
-    const afterUpload = getUploadedFile(req.files, ['afterImageFile', 'proofImage']);
-    const billUpload = getUploadedFile(req.files, ['billImageFile']);
+    const afterUpload = getUploadedFile(req.files, ['afterImageFile', 'proofImage', 'afterImage']);
+    const billUpload = getUploadedFile(req.files, ['billImageFile', 'billImage']);
     const afterImage = afterUpload
-      ? toProofPath(afterUpload)
+      ? toUploadedPath(afterUpload)
       : normalizeBodyString(req.body.afterImage || req.body.after_image);
     const billImage = billUpload
-      ? toProofPath(billUpload)
+      ? toUploadedPath(billUpload)
       : normalizeBodyString(req.body.billImage || req.body.bill_image);
     const description = normalizeBodyString(req.body.workDescription || req.body.description);
     const afterGeo = await enrichProofGeo(req.body, 'after');
@@ -647,11 +733,11 @@ const submitAfterWork = async (req, res) => {
     }
 
     if (!isAccurateProofGeo(afterGeo)) {
-      return res.status(400).json({ message: 'Location not accurate. Try again.' });
+      return res.status(400).json({ message: 'Move to open area for accurate GPS' });
     }
 
     if (billGeo && !isAccurateProofGeo(billGeo)) {
-      return res.status(400).json({ message: 'Location not accurate. Try again.' });
+      return res.status(400).json({ message: 'Move to open area for accurate GPS' });
     }
 
     const finalBillGeo = billGeo || afterGeo;
@@ -671,14 +757,15 @@ const submitAfterWork = async (req, res) => {
       billAddress: finalBillGeo.address,
       billTimestamp: finalBillGeo.time
     });
-    complaint.status = 'completed';
+    complaint.status = WORKER_WAITING_FOR_HEAD_STATUS;
     complaint.timeline.push({
-      status: 'completed',
+      status: WORKER_WAITING_FOR_HEAD_STATUS,
       updated_by: req.user.id,
       comments: 'Worker completed the task and submitted after-work proof with bill'
     });
 
     await complaint.save();
+    const task = await loadTaskForResponse(complaint._id);
 
     const departmentHeadIds = await getDepartmentHeadIds(complaint.department_id);
     await createNotificationsForUsers({
@@ -690,10 +777,13 @@ const submitAfterWork = async (req, res) => {
     });
 
     return res.json({
+      success: true,
       message: 'After work submitted successfully',
-      complaint
+      complaint: task,
+      task
     });
   } catch (err) {
+    console.error('[submitAfterWork] failed', err);
     return res.status(err.status || 500).json({ message: err.message || 'Server error' });
   }
 };
@@ -867,10 +957,10 @@ router.post('/assign/:id', auth, authorize('head'), async (req, res) => {
   }
 });
 
-router.patch('/:id/before', auth, authorize('worker', 'volunteer'), submitBeforeWork);
-router.post('/:id/before', auth, authorize('worker', 'volunteer'), submitBeforeWork);
-router.patch('/tasks/:id/before', auth, authorize('worker', 'volunteer'), submitBeforeWork);
-router.post('/tasks/:id/before', auth, authorize('worker', 'volunteer'), submitBeforeWork);
+router.patch('/:id/before', auth, authorize('worker', 'volunteer'), upload.single('beforeImage'), submitBeforeWork);
+router.post('/:id/before', auth, authorize('worker', 'volunteer'), upload.single('beforeImage'), submitBeforeWork);
+router.patch('/tasks/:id/before', auth, authorize('worker', 'volunteer'), upload.single('beforeImage'), submitBeforeWork);
+router.post('/tasks/:id/before', auth, authorize('worker', 'volunteer'), upload.single('beforeImage'), submitBeforeWork);
 router.post('/start-work/:id', auth, authorize('worker', 'volunteer'), submitBeforeWork);
 router.patch('/:id/after', auth, authorize('worker', 'volunteer'), submitAfterWork);
 router.post('/:id/after', auth, authorize('worker', 'volunteer'), submitAfterWork);
@@ -1013,7 +1103,13 @@ router.get('/my-tasks', auth, authorize('worker', 'volunteer'), async (req, res)
       ? { assigned_worker_id: req.user.id } 
       : { assigned_volunteer_id: req.user.id };
     
-    const tasks = await Complaint.find(query).sort({ updatedAt: -1 });
+    const tasks = await Complaint.find(query)
+      .populate('created_by', 'name')
+      .populate('department_id', 'name department_id')
+      .populate('assigned_worker_id', 'name')
+      .populate('assigned_volunteer_id', 'name')
+      .populate('timeline.updated_by', 'name role')
+      .sort({ updatedAt: -1 });
     res.json(tasks);
   } catch (err) {
     res.status(500).json({ message: 'Server error' });

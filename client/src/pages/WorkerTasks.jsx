@@ -1,65 +1,86 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import axios from 'axios';
+import { Link, useNavigate } from 'react-router-dom';
 import {
-  AlertTriangle,
   Camera,
   CheckCircle2,
-  Clock,
+  Clock3,
   FileText,
-  Image as ImageIcon,
+  Loader,
   MapPin,
   Receipt,
-  RefreshCw
+  RefreshCw,
+  ShieldCheck,
+  Upload
 } from 'lucide-react';
-import api, { resolveApiAssetUrl } from '../api';
+import api, { API_BASE_URL, resolveApiAssetUrl } from '../api';
 import { useNotification } from '../context/NotificationContext';
 import {
-  LOCATION_TARGET_ACCURACY_METERS,
-  formatAccuracyMeters,
-  watchForAccuratePosition
-} from '../utils/geolocation';
+  formatAddressForDisplay,
+  getLocationAddress,
+  getProofLocation,
+  reverseGeocodeAddress
+} from '../utils/location';
+import { formatAccuracyMeters } from '../utils/geolocation';
 
-const SUPPORTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/jpg', 'image/png']);
-const LOCATION_MAX_ACCURACY_METERS = LOCATION_TARGET_ACCURACY_METERS;
-const LOCATION_REQUIRED_MESSAGE = 'Location required';
+const GPS_ACCURACY_LIMIT_METERS = 200;
+const SUPPORTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp']);
+
+const STATUS_COPY = {
+  PENDING: {
+    badge: 'PENDING',
+    tone: 'pending',
+    title: 'Before Work Verification',
+    text: 'Capture live work-start proof with GPS verification'
+  },
+  IN_PROGRESS: {
+    badge: 'IN_PROGRESS',
+    tone: 'progress',
+    title: 'After Work Submission',
+    text: 'Upload completed civic work proof'
+  },
+  WAITING_FOR_APPROVAL: {
+    badge: 'WAITING',
+    tone: 'waiting',
+    title: 'Waiting for Department Verification',
+    text: 'Department Head is reviewing your completed civic work.'
+  },
+  COMPLETED: {
+    badge: 'COMPLETED',
+    tone: 'completed',
+    title: 'Task Completed Successfully',
+    text: 'The civic task is verified and closed.'
+  }
+};
 
 const createDraft = () => ({
-  beforeFile: null,
+  beforeImageFile: null,
   beforePreview: '',
   beforeLocation: null,
   beforeLocationLoading: false,
   beforeLocationError: '',
   beforeSubmitting: false,
-  afterFile: null,
+  afterImageFile: null,
   afterPreview: '',
   afterLocation: null,
   afterLocationLoading: false,
   afterLocationError: '',
-  billFile: null,
+  billImageFile: null,
   billPreview: '',
   description: '',
   afterSubmitting: false,
   formError: ''
 });
 
-const createCameraModal = () => ({
-  open: false,
-  taskId: '',
-  field: 'before',
-  error: '',
-  starting: false,
-  processing: false
-});
-
-const revokePreviewUrl = (previewUrl) => {
-  if (previewUrl?.startsWith('blob:')) {
-    URL.revokeObjectURL(previewUrl);
+const revokePreview = (value) => {
+  if (value?.startsWith('blob:')) {
+    URL.revokeObjectURL(value);
   }
 };
 
 const formatDateTime = (value) => {
   if (!value) {
-    return '';
+    return 'Time unavailable';
   }
 
   return new Intl.DateTimeFormat('en-IN', {
@@ -69,96 +90,6 @@ const formatDateTime = (value) => {
     hour: '2-digit',
     minute: '2-digit'
   }).format(new Date(value));
-};
-
-const getLocationAccuracy = (location) => {
-  const accuracy = Number(location?.accuracy);
-  return Number.isFinite(accuracy) ? accuracy : null;
-};
-
-const hasAccurateLocation = (location) => {
-  const accuracy = getLocationAccuracy(location);
-  return accuracy !== null && accuracy <= LOCATION_MAX_ACCURACY_METERS;
-};
-
-const formatAccuracy = (accuracy) => {
-  return formatAccuracyMeters(accuracy);
-};
-
-const formatCoordinates = (lat, lng) => `Lat ${Number(lat).toFixed(5)}, Lng ${Number(lng).toFixed(5)}`;
-
-const getWorkerStage = (task) => {
-  const status = String(task?.status || '').toLowerCase();
-
-  if (status === 'in_progress') {
-    return 'IN_PROGRESS';
-  }
-
-  if (['completed', 'verified', 'waiting_for_head', 'waiting_for_verification'].includes(status)) {
-    return 'COMPLETED';
-  }
-
-  return 'PENDING';
-};
-
-const getStageAccent = (stage) => {
-  if (stage === 'IN_PROGRESS') {
-    return 'progress';
-  }
-
-  if (stage === 'COMPLETED') {
-    return 'completed';
-  }
-
-  return 'pending';
-};
-
-const getStageLabel = (stage) => {
-  if (stage === 'IN_PROGRESS') {
-    return 'In Progress';
-  }
-
-  if (stage === 'COMPLETED') {
-    return 'Completed';
-  }
-
-  return 'Pending';
-};
-
-const getImageValue = (task, key) => {
-  if (key === 'before') {
-    return task?.beforeWork?.image || task?.beforeImage || task?.work_proof?.before_image || '';
-  }
-
-  if (key === 'after') {
-    return task?.afterWork?.image || task?.afterImage || task?.work_proof?.after_image || '';
-  }
-
-  return task?.afterWork?.billImage || task?.billImage || task?.work_proof?.bill_image || '';
-};
-
-const getLocationValue = (task, key) => {
-  if (key === 'before') {
-    return {
-      address: task?.beforeWork?.address || task?.beforeAddress || '',
-      accuracy: task?.beforeWork?.accuracy ?? task?.beforeAccuracy,
-      timestamp: task?.beforeWork?.timestamp || task?.beforeTime || ''
-    };
-  }
-
-  if (key === 'after') {
-    return {
-      address: task?.afterWork?.address || task?.afterAddress || '',
-      accuracy: task?.afterWork?.accuracy ?? task?.afterAccuracy,
-      timestamp: task?.afterWork?.timestamp || task?.afterTime || ''
-    };
-  }
-
-  return {
-    address: task?.afterWork?.billAddress || task?.billAddress || '',
-    accuracy: task?.afterWork?.billAccuracy ?? task?.billAccuracy,
-    timestamp: task?.afterWork?.billTimestamp || task?.billTime || ''
-  };
 };
 
 const validateImageFile = (file) => {
@@ -171,235 +102,195 @@ const validateImageFile = (file) => {
   }
 
   if (!SUPPORTED_IMAGE_TYPES.has(String(file.type || '').toLowerCase())) {
-    return 'Only JPG, JPEG, and PNG images are allowed.';
+    return 'Only JPG, JPEG, PNG, and WEBP images are allowed.';
   }
 
   return '';
 };
 
-const reverseGeocode = async (lat, lng) => {
-  const response = await fetch(
-    `https://nominatim.openstreetmap.org/reverse?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}&format=json`,
-    {
-      headers: {
-        Accept: 'application/json'
-      }
-    }
-  );
+const getTaskStage = (task) => {
+  const status = String(task?.status || '').toLowerCase();
 
-  const data = await response.json();
-  return data?.display_name || 'Address not found';
-};
-
-const dataUrlToFile = (dataUrl, filename) => {
-  const [meta, content] = dataUrl.split(',');
-  const mimeMatch = meta?.match(/data:(.*?);base64/);
-  const mimeType = mimeMatch?.[1] || 'image/jpeg';
-  const binary = atob(content || '');
-  const bytes = new Uint8Array(binary.length);
-
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
+  if (status === 'in_progress') {
+    return 'IN_PROGRESS';
   }
 
-  return new File([bytes], filename, { type: mimeType });
+  if (['waiting_for_head', 'waiting_for_verification', 'verified'].includes(status)) {
+    return 'WAITING_FOR_APPROVAL';
+  }
+
+  if (status === 'completed') {
+    return 'COMPLETED';
+  }
+
+  return 'PENDING';
 };
 
+const hasAccurateLocation = (location) => {
+  const accuracy = Number(location?.accuracy);
+  return (
+    Number.isFinite(Number(location?.lat))
+    && Number.isFinite(Number(location?.lng))
+    && String(location?.address || '').trim().length > 0
+    && Number.isFinite(accuracy)
+    && accuracy <= GPS_ACCURACY_LIMIT_METERS
+  );
+};
+
+const getAssignedBy = (task) => {
+  const timeline = Array.isArray(task?.timeline) ? [...task.timeline] : [];
+  const assignment = timeline
+    .reverse()
+    .find((entry) => String(entry?.status || '').toLowerCase() === 'assigned_to_worker');
+
+  return assignment?.updated_by?.name || task?.created_by?.name || 'Department Head';
+};
+
+const getStoredImage = (task, type) => {
+  if (type === 'before') {
+    return task?.beforeWork?.image || task?.beforeImage || task?.work_proof?.before_image || '';
+  }
+
+  if (type === 'after') {
+    return task?.afterWork?.image || task?.afterImage || task?.work_proof?.after_image || '';
+  }
+
+  return task?.afterWork?.billImage || task?.billImage || task?.work_proof?.bill_image || '';
+};
+
+const getStoredDescription = (task) => (
+  task?.afterWork?.description
+  || task?.workDescription
+  || task?.work_proof?.description
+  || 'No description submitted.'
+);
+
 const WorkerTasks = () => {
+  const navigate = useNavigate();
   const [tasks, setTasks] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [drafts, setDrafts] = useState({});
-  const [cameraModal, setCameraModal] = useState(createCameraModal);
   const draftsRef = useRef({});
-  const cameraStreamRef = useRef(null);
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
   const fileInputRefs = useRef({});
+  const locationRequestRef = useRef({});
   const { addToast } = useNotification();
+  const addToastRef = useRef(addToast);
 
   useEffect(() => {
     draftsRef.current = drafts;
   }, [drafts]);
 
+  useEffect(() => {
+    addToastRef.current = addToast;
+  }, [addToast]);
+
   useEffect(() => () => {
     Object.values(draftsRef.current).forEach((draft) => {
-      revokePreviewUrl(draft.beforePreview);
-      revokePreviewUrl(draft.afterPreview);
-      revokePreviewUrl(draft.billPreview);
+      revokePreview(draft.beforePreview);
+      revokePreview(draft.afterPreview);
+      revokePreview(draft.billPreview);
     });
   }, []);
-
-  const stopCameraStream = useCallback(() => {
-    if (cameraStreamRef.current) {
-      cameraStreamRef.current.getTracks().forEach((track) => track.stop());
-      cameraStreamRef.current = null;
-    }
-
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-  }, []);
-
-  useEffect(() => () => {
-    stopCameraStream();
-  }, [stopCameraStream]);
-
-  useEffect(() => {
-    if (!cameraModal.open) {
-      stopCameraStream();
-      return undefined;
-    }
-
-    let cancelled = false;
-
-    const startCamera = async () => {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        const message = 'Camera is not supported in this browser';
-        setCameraModal((current) => ({ ...current, starting: false, error: message }));
-        addToast(message, 'error');
-        return;
-      }
-
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: 'environment'
-          }
-        });
-
-        if (cancelled) {
-          stream.getTracks().forEach((track) => track.stop());
-          return;
-        }
-
-        cameraStreamRef.current = stream;
-
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play().catch(() => {});
-        }
-
-        setCameraModal((current) => ({ ...current, starting: false, error: '' }));
-      } catch (error) {
-        const message = error?.name === 'NotAllowedError'
-          ? 'Camera permission denied'
-          : error instanceof Error
-            ? error.message
-            : 'Unable to open camera';
-
-        setCameraModal((current) => ({ ...current, starting: false, error: message }));
-        addToast(message, 'error');
-      }
-    };
-
-    setCameraModal((current) => ({ ...current, starting: true, error: '' }));
-    void startCamera();
-
-    return () => {
-      cancelled = true;
-      stopCameraStream();
-    };
-  }, [addToast, cameraModal.open, stopCameraStream]);
-
-  const getDraft = (taskId) => drafts[taskId] || createDraft();
-
-  const updateDraft = (taskId, nextValue) => {
-    setDrafts((current) => {
-      const existing = current[taskId] || createDraft();
-      const updated = typeof nextValue === 'function'
-        ? nextValue(existing)
-        : { ...existing, ...nextValue };
-
-      return {
-        ...current,
-        [taskId]: updated
-      };
-    });
-  };
-
-  const clearDraft = (taskId) => {
-    setDrafts((current) => {
-      const draft = current[taskId];
-      if (!draft) {
-        return current;
-      }
-
-      revokePreviewUrl(draft.beforePreview);
-      revokePreviewUrl(draft.afterPreview);
-      revokePreviewUrl(draft.billPreview);
-
-      const nextDrafts = { ...current };
-      delete nextDrafts[taskId];
-      return nextDrafts;
-    });
-  };
 
   const fetchTasks = useCallback(async () => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      navigate('/login');
+      return;
+    }
+
     try {
       setLoading(true);
-      const response = await api.get('/complaints/my-tasks');
+      const response = await api.get('/complaints/my-tasks', {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
       setTasks(Array.isArray(response.data) ? response.data : []);
     } catch (error) {
-      console.error('Failed to fetch worker tasks', error);
+      console.error('Failed to load worker tasks', error);
+      if (error.response?.status === 401) {
+        navigate('/login');
+        return;
+      }
+      addToastRef.current?.('Unable to load assigned tasks right now.', 'error');
       setTasks([]);
-      addToast('Unable to load assigned tasks right now.', 'error');
     } finally {
       setLoading(false);
     }
-  }, [addToast]);
+  }, [navigate]);
 
   useEffect(() => {
     void fetchTasks();
   }, [fetchTasks]);
 
-  const openFilePicker = (taskId, field) => {
-    fileInputRefs.current[`${taskId}:${field}`]?.click();
-  };
+  const getDraft = useCallback((taskId) => drafts[taskId] || createDraft(), [drafts]);
 
-  const resetCaptureField = (taskId, field) => {
-    const fileKey = `${field}File`;
-    const previewKey = `${field}Preview`;
-    const locationKey = `${field}Location`;
-    const loadingKey = `${field}LocationLoading`;
-    const errorKey = `${field}LocationError`;
-
-    updateDraft(taskId, (current) => {
-      revokePreviewUrl(current[previewKey]);
+  const updateDraft = useCallback((taskId, updater) => {
+    setDrafts((current) => {
+      const existing = current[taskId] || createDraft();
+      const nextValue = typeof updater === 'function'
+        ? updater(existing)
+        : { ...existing, ...updater };
 
       return {
         ...current,
-        [fileKey]: null,
-        [previewKey]: '',
-        [locationKey]: null,
-        [loadingKey]: false,
-        [errorKey]: '',
+        [taskId]: nextValue
+      };
+    });
+  }, []);
+
+  const clearDraft = useCallback((taskId) => {
+    setDrafts((current) => {
+      const existing = current[taskId];
+      if (!existing) {
+        return current;
+      }
+
+      revokePreview(existing.beforePreview);
+      revokePreview(existing.afterPreview);
+      revokePreview(existing.billPreview);
+
+      const nextDrafts = { ...current };
+      delete nextDrafts[taskId];
+      return nextDrafts;
+    });
+  }, []);
+
+  const replaceTask = useCallback((nextTask) => {
+    if (!nextTask?._id) {
+      return;
+    }
+
+    setTasks((current) => current.map((task) => (
+      task._id === nextTask._id ? nextTask : task
+    )));
+  }, []);
+
+  const triggerInput = (taskId, field) => {
+    fileInputRefs.current[`${taskId}:${field}`]?.click();
+  };
+
+  const setPreviewFile = useCallback((taskId, previewKey, fileKey, file) => {
+    updateDraft(taskId, (current) => {
+      revokePreview(current[previewKey]);
+      return {
+        ...current,
+        [fileKey]: file,
+        [previewKey]: URL.createObjectURL(file),
         formError: ''
       };
     });
-  };
+  }, [updateDraft]);
 
-  const openCameraModal = (taskId, field) => {
-    resetCaptureField(taskId, field);
-    setCameraModal({
-      open: true,
-      taskId,
-      field,
-      error: '',
-      starting: true,
-      processing: false
-    });
-  };
+  const detectLiveLocation = useCallback(async (taskId, field) => {
+    const requestKey = `${taskId}:${field}`;
+    const requestNumber = (locationRequestRef.current[requestKey] || 0) + 1;
+    locationRequestRef.current[requestKey] = requestNumber;
 
-  const closeCameraModal = () => {
-    stopCameraStream();
-    setCameraModal(createCameraModal());
-  };
-
-  const captureLiveLocation = async (taskId, field, options = {}) => {
     const loadingKey = `${field}LocationLoading`;
     const errorKey = `${field}LocationError`;
     const locationKey = `${field}Location`;
-    const { alertOnDenied = false } = options;
 
     updateDraft(taskId, {
       [loadingKey]: true,
@@ -408,354 +299,313 @@ const WorkerTasks = () => {
       formError: ''
     });
 
-    try {
-      const position = await watchForAccuratePosition({
-        targetAccuracy: LOCATION_MAX_ACCURACY_METERS,
-        onProgress: (nextPosition) => {
-          const lat = Number(nextPosition.coords.latitude);
-          const lng = Number(nextPosition.coords.longitude);
-          const accuracy = Number(nextPosition.coords.accuracy);
+    const updateIfCurrent = (payload) => {
+      if (locationRequestRef.current[requestKey] !== requestNumber) {
+        return;
+      }
 
-          updateDraft(taskId, {
-            [loadingKey]: true,
-            [errorKey]: '',
-            [locationKey]: {
-              lat,
-              lng,
-              address: '',
-              accuracy: Number.isFinite(accuracy) ? accuracy : null,
-              timestamp: ''
-            },
-            formError: ''
-          });
-        }
+      updateDraft(taskId, payload);
+    };
+
+    try {
+      if (!navigator.geolocation?.getCurrentPosition) {
+        throw new Error('Location is not supported in this browser.');
+      }
+
+      const position = await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 0
+        });
       });
+
       const lat = Number(position.coords.latitude);
       const lng = Number(position.coords.longitude);
       const accuracy = Number(position.coords.accuracy);
 
-      const timestamp = new Date().toISOString();
-      const address = await reverseGeocode(lat, lng).catch(() => formatCoordinates(lat, lng));
-      const location = {
-        lat,
-        lng,
-        address: address || formatCoordinates(lat, lng),
-        accuracy,
-        timestamp
-      };
-
-      updateDraft(taskId, {
-        [loadingKey]: false,
-        [locationKey]: location
-      });
-      return { location, error: '' };
-    } catch (error) {
-      const isPermissionDenied = error?.code === 1 || error?.name === 'NotAllowedError';
-      const message = isPermissionDenied
-        ? LOCATION_REQUIRED_MESSAGE
-        : error instanceof Error
-          ? error.message
-          : 'Unable to fetch your live location.';
-
-      updateDraft(taskId, {
-        [loadingKey]: false,
-        [locationKey]: null,
-        [errorKey]: message
-      });
-
-      if (isPermissionDenied && alertOnDenied && typeof window !== 'undefined') {
-        window.alert(LOCATION_REQUIRED_MESSAGE);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        throw new Error('Unable to detect GPS coordinates.');
       }
 
-      addToast(message, 'error');
-      return { location: null, error: message };
+      if (!Number.isFinite(accuracy) || accuracy > GPS_ACCURACY_LIMIT_METERS) {
+        throw new Error('Move to open area for accurate GPS');
+      }
+
+      const address = String(await reverseGeocodeAddress(lat, lng) || '').trim();
+      if (!address) {
+        throw new Error('Unable to fetch full live address');
+      }
+
+      updateIfCurrent({
+        [loadingKey]: false,
+        [errorKey]: '',
+        [locationKey]: {
+          lat,
+          lng,
+          accuracy,
+          address,
+          timestamp: new Date(position.timestamp || Date.now()).toISOString()
+        }
+      });
+    } catch (error) {
+      const message = error?.code === 1
+        ? 'Location permission denied'
+        : error instanceof Error
+          ? error.message
+          : 'Unable to detect live location';
+
+      updateIfCurrent({
+        [loadingKey]: false,
+        [errorKey]: message,
+        [locationKey]: null
+      });
+      addToastRef.current?.(message, 'error');
     }
-  };
+  }, [updateDraft]);
 
-  const setPreviewFile = (taskId, field, file, previewOverride) => {
-    const previewKey = `${field}Preview`;
-    const fileKey = `${field}File`;
-
-    updateDraft(taskId, (current) => {
-      revokePreviewUrl(current[previewKey]);
-
-      return {
-        ...current,
-        [fileKey]: file,
-        [previewKey]: previewOverride || URL.createObjectURL(file),
-        formError: ''
-      };
-    });
-  };
-
-  const handleFileChange = (taskId, field, event) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-
-    if (!file) {
+  const handleBeforeImage = useCallback(async (taskId, file) => {
+    const validationMessage = validateImageFile(file);
+    if (validationMessage) {
+      updateDraft(taskId, { formError: validationMessage });
+      addToastRef.current?.(validationMessage, 'error');
       return;
     }
 
-    const validationError = validateImageFile(file);
-    if (validationError) {
-      updateDraft(taskId, { formError: validationError });
-      addToast(validationError, 'error');
+    setPreviewFile(taskId, 'beforePreview', 'beforeImageFile', file);
+    await detectLiveLocation(taskId, 'before');
+  }, [detectLiveLocation, setPreviewFile, updateDraft]);
+
+  const handleAfterImage = useCallback(async (taskId, file) => {
+    const validationMessage = validateImageFile(file);
+    if (validationMessage) {
+      updateDraft(taskId, { formError: validationMessage });
+      addToastRef.current?.(validationMessage, 'error');
       return;
     }
 
-    setPreviewFile(taskId, field, file);
-  };
+    setPreviewFile(taskId, 'afterPreview', 'afterImageFile', file);
+    await detectLiveLocation(taskId, 'after');
+  }, [detectLiveLocation, setPreviewFile, updateDraft]);
 
-  const capturePhoto = async () => {
-    const { field, taskId } = cameraModal;
-
-    if (!taskId || !field || !videoRef.current || !canvasRef.current) {
+  const handleBillImage = useCallback((taskId, file) => {
+    const validationMessage = validateImageFile(file);
+    if (validationMessage) {
+      updateDraft(taskId, { formError: validationMessage });
+      addToastRef.current?.(validationMessage, 'error');
       return;
     }
 
-    const width = videoRef.current.videoWidth || 1280;
-    const height = videoRef.current.videoHeight || 720;
-    const context = canvasRef.current.getContext('2d');
-
-    if (!context) {
-      const message = 'Unable to capture image from camera';
-      addToast(message, 'error');
-      setCameraModal((current) => ({ ...current, error: message }));
-      return;
-    }
-
-    setCameraModal((current) => ({ ...current, processing: true, error: '' }));
-
-    const { location, error } = await captureLiveLocation(taskId, field, { alertOnDenied: true });
-    if (!location || !hasAccurateLocation(location)) {
-      setCameraModal((current) => ({
-        ...current,
-        processing: false,
-        error: error || LOCATION_REQUIRED_MESSAGE
-      }));
-      return;
-    }
-
-    canvasRef.current.width = width;
-    canvasRef.current.height = height;
-    context.drawImage(videoRef.current, 0, 0, width, height);
-
-    const imageBase64 = canvasRef.current.toDataURL('image/jpeg', 0.92);
-    const imageFile = dataUrlToFile(imageBase64, `${field}-work-${Date.now()}.jpg`);
-    setPreviewFile(taskId, field, imageFile, imageBase64);
-    setCameraModal((current) => ({ ...current, processing: false }));
-    closeCameraModal();
-  };
+    setPreviewFile(taskId, 'billPreview', 'billImageFile', file);
+  }, [setPreviewFile, updateDraft]);
 
   const submitBeforeWork = async (task) => {
     const draft = getDraft(task._id);
+    const locationData = draft.beforeLocation;
+    const beforeImage = draft.beforeImageFile;
+    const token = localStorage.getItem('token');
 
-    if (!draft.beforeFile || !hasAccurateLocation(draft.beforeLocation)) {
-      const message = 'Before photo and an accurate live location are required.';
-      updateDraft(task._id, { formError: message });
-      addToast(message, 'error');
+    console.log('Submitting Before Work');
+    console.log({
+      taskId: task?._id,
+      beforeImage,
+      locationData,
+      hasToken: Boolean(token)
+    });
+
+    if (!task?._id) {
+      const message = 'Task ID missing';
+      addToastRef.current?.(message, 'error');
+      return;
+    }
+
+    if (!draft.beforeImageFile) {
+      const message = 'Upload image first';
+      updateDraft(task._id, { beforeSubmitting: false, formError: message });
+      addToastRef.current?.(message, 'error');
+      return;
+    }
+
+    if (!Number.isFinite(Number(locationData?.lat)) || !Number.isFinite(Number(locationData?.lng))) {
+      const message = 'Location missing';
+      updateDraft(task._id, { beforeSubmitting: false, formError: message });
+      addToastRef.current?.(message, 'error');
+      return;
+    }
+
+    if (!String(locationData?.address || '').trim()) {
+      const message = 'Address missing';
+      updateDraft(task._id, { beforeSubmitting: false, formError: message });
+      addToastRef.current?.(message, 'error');
+      return;
+    }
+
+    if (!token) {
+      navigate('/login');
       return;
     }
 
     updateDraft(task._id, { beforeSubmitting: true, formError: '' });
 
     try {
-      const payload = new FormData();
-      payload.append('beforeImageFile', draft.beforeFile);
-      payload.append('beforeLocation', JSON.stringify(draft.beforeLocation));
+      const formData = new FormData();
+      formData.append('beforeImage', draft.beforeImageFile);
+      formData.append('lat', String(locationData.lat));
+      formData.append('lng', String(locationData.lng));
+      formData.append('accuracy', String(locationData.accuracy ?? ''));
+      formData.append('address', locationData.address || '');
+      formData.append('submittedAt', locationData.timestamp || new Date().toISOString());
+      formData.append('beforeLocation', JSON.stringify(locationData));
 
-      console.log('Before payload', {
-        beforeImage: draft.beforeFile?.name || '',
-        beforeLocation: draft.beforeLocation
-      });
+      console.log([...formData.entries()]);
 
-      const response = await api.patch(`/tasks/${task._id}/before`, payload, {
+      const response = await axios.patch(`${API_BASE_URL}/tasks/${task._id}/before`, formData, {
         headers: {
-          'Content-Type': 'multipart/form-data'
+          Authorization: `Bearer ${token}`
         }
       });
 
-      console.log('Before response', response.data);
+      console.log(response.data);
 
       clearDraft(task._id);
-      await fetchTasks();
-      addToast('Before work submitted successfully.', 'success');
+      replaceTask(response.data?.task || response.data?.complaint);
+      addToastRef.current?.('Before work submitted', 'success');
     } catch (error) {
-      console.error(error.response?.data || error.message);
-      const message = error.response?.data?.message || 'Failed to submit before work.';
+      console.log('FULL ERROR:', error);
+      console.log('ERROR RESPONSE:', error.response?.data);
+      if (error.response?.status === 401) {
+        navigate('/login');
+        return;
+      }
+      const message = error.response?.data?.message || error.message || 'Submission failed';
       updateDraft(task._id, { beforeSubmitting: false, formError: message });
-      addToast(message, 'error');
+      addToastRef.current?.(message, 'error');
     }
   };
 
   const submitAfterWork = async (task) => {
     const draft = getDraft(task._id);
 
-    if (!draft.afterFile || !draft.billFile || !hasAccurateLocation(draft.afterLocation) || !draft.description.trim()) {
-      const message = 'After photo, bill proof, description, and an accurate live location are required.';
+    if (!draft.afterImageFile || !draft.billImageFile || !draft.description.trim() || !hasAccurateLocation(draft.afterLocation)) {
+      const message = 'After image, bill copy, description, and accurate GPS location are required.';
       updateDraft(task._id, { formError: message });
-      addToast(message, 'error');
+      addToastRef.current?.(message, 'error');
       return;
     }
 
     updateDraft(task._id, { afterSubmitting: true, formError: '' });
 
     try {
-      const payload = new FormData();
-      payload.append('afterImageFile', draft.afterFile);
-      payload.append('billImageFile', draft.billFile);
-      payload.append('afterLocation', JSON.stringify(draft.afterLocation));
-      payload.append('description', draft.description.trim());
+      const formData = new FormData();
+      formData.append('afterImage', draft.afterImageFile);
+      formData.append('billImage', draft.billImageFile);
+      formData.append('description', draft.description.trim());
+      formData.append('workDescription', draft.description.trim());
+      formData.append('lat', String(draft.afterLocation.lat));
+      formData.append('lng', String(draft.afterLocation.lng));
+      formData.append('accuracy', String(draft.afterLocation.accuracy));
+      formData.append('address', draft.afterLocation.address);
+      formData.append('submittedAt', draft.afterLocation.timestamp);
+      formData.append('afterLocation', JSON.stringify(draft.afterLocation));
+      formData.append('billLocation', JSON.stringify(draft.afterLocation));
+      console.log('After work form data', Array.from(formData.entries()));
 
-      console.log('After payload', {
-        afterImage: draft.afterFile?.name || '',
-        afterLocation: draft.afterLocation,
-        billImage: draft.billFile?.name || '',
-        description: draft.description.trim()
-      });
-
-      const response = await api.patch(`/tasks/${task._id}/after`, payload, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        }
-      });
-
-      console.log('After response', response.data);
+      const response = await api.patch(`/tasks/${task._id}/after`, formData);
 
       clearDraft(task._id);
-      await fetchTasks();
-      addToast('After work submitted successfully.', 'success');
+      replaceTask(response.data?.complaint || response.data?.task);
+      addToastRef.current?.('Completed work submitted successfully', 'success');
     } catch (error) {
-      console.error(error.response?.data || error.message);
-      const message = error.response?.data?.message || 'Failed to submit after work.';
+      console.error('After work submit failed', error.response?.data || error);
+      const message = error.response?.data?.message || 'Completed work submission failed';
       updateDraft(task._id, { afterSubmitting: false, formError: message });
-      addToast(message, 'error');
+      addToastRef.current?.(message, 'error');
     }
   };
 
-  const renderLocationBlock = (location, loading, error) => {
-    if (loading) {
+  const renderLocationCard = (location, loadingState, errorState, retryAction) => {
+    if (loadingState) {
       return (
-        <div className="location-pill location-loading">
-          <RefreshCw size={14} className="spin" />
-          <span>
-            {getLocationAccuracy(location) !== null
-              ? `Detecting accurate location... Current accuracy: ${formatAccuracy(location.accuracy)}. Waiting for ${LOCATION_MAX_ACCURACY_METERS} m or better.`
-              : `Detecting accurate location... Waiting for ${LOCATION_MAX_ACCURACY_METERS} m or better.`}
-          </span>
+        <div className="worker-location-card info">
+          <Loader size={16} className="spin" />
+          <span>Detecting accurate GPS location...</span>
         </div>
       );
     }
 
-    if (error) {
+    if (errorState) {
       return (
-        <div className="location-warning">
-          <div className="location-warning-copy">
-            <AlertTriangle size={16} />
-            <span>{error}</span>
-          </div>
+        <div className="worker-location-card warning">
+          <span>{errorState}</span>
+          <button type="button" className="worker-inline-button" onClick={retryAction}>
+            Retry
+          </button>
         </div>
       );
     }
 
     if (!location) {
       return (
-        <div className="location-pill">
-          <MapPin size={14} />
-          <span>Capture a photo to attach a live GPS location.</span>
-        </div>
-      );
-    }
-
-    if (!hasAccurateLocation(location)) {
-      return (
-        <div className="location-warning">
-          <div className="location-warning-copy">
-            <AlertTriangle size={16} />
-            <span>{`Location accuracy must be ${LOCATION_MAX_ACCURACY_METERS} m or better.`}</span>
-          </div>
+        <div className="worker-location-card muted">
+          <span>Live address will appear after photo upload or capture.</span>
         </div>
       );
     }
 
     return (
-      <div className="location-card">
-        <div className="location-row">
-          <MapPin size={14} />
-          <span>{location.address}</span>
+      <div className="worker-location-card success">
+        <div className="worker-location-line">
+          <MapPin size={16} />
+          <p>{formatAddressForDisplay(location.address)}</p>
         </div>
-        <div className="location-row">
-          <CheckCircle2 size={14} />
-          <span>{`Accuracy: ${formatAccuracy(location.accuracy)}`}</span>
+        <div className="worker-location-line small">
+          <ShieldCheck size={16} />
+          <span>{`GPS Accuracy: ${formatAccuracyMeters(location.accuracy)}`}</span>
+        </div>
+        <div className="worker-location-line small">
+          <Clock3 size={16} />
+          <span>{formatDateTime(location.timestamp)}</span>
         </div>
       </div>
     );
   };
 
-  const renderDraftPreview = (title, previewUrl, location) => (
-    <div className="preview-shell">
-      <span className="preview-label">{title}</span>
+  const renderPreviewCard = (label, previewUrl, fileName, locationContent) => (
+    <div className="worker-preview-card">
+      <span className="worker-section-label">{label}</span>
       {previewUrl ? (
-        <>
-          <div className="preview-card">
-            <img src={previewUrl} alt={title} className="preview-image" />
-          </div>
-          {location ? (
-            <div className="preview-meta">
-              <div className="location-row">
-                <MapPin size={14} />
-                <span>{location.address}</span>
-              </div>
-              {getLocationAccuracy(location) !== null ? (
-                <div className="location-row">
-                  <CheckCircle2 size={14} />
-                  <span>{`Accuracy: ${formatAccuracy(location.accuracy)}`}</span>
-                </div>
-              ) : null}
-              <div className="location-row">
-                <Clock size={14} />
-                <span>{formatDateTime(location.timestamp)}</span>
-              </div>
-            </div>
-          ) : null}
-        </>
+        <img src={previewUrl} alt={label} className="worker-proof-image" />
       ) : (
-        <div className="preview-empty">
-          <ImageIcon size={18} />
-          <span>No image selected yet</span>
-        </div>
+        <div className="worker-empty-preview">No image selected yet.</div>
       )}
+      {fileName ? <p className="worker-file-name">{fileName}</p> : null}
+      {locationContent}
     </div>
   );
 
-  const renderStoredPreview = (title, imageUrl, location) => (
-    <div className="summary-media">
-      <span className="preview-label">{title}</span>
-      {imageUrl ? (
-        <div className="preview-card">
-          <img src={resolveApiAssetUrl(imageUrl)} alt={title} className="preview-image" />
-        </div>
+  const renderStoredPreview = (label, imagePath, location) => (
+    <div className="worker-preview-card">
+      <span className="worker-section-label">{label}</span>
+      {imagePath ? (
+        <img src={resolveApiAssetUrl(imagePath)} alt={label} className="worker-proof-image" />
       ) : (
-        <div className="preview-empty">
-          <ImageIcon size={18} />
-          <span>No image available</span>
-        </div>
+        <div className="worker-empty-preview">Not available.</div>
       )}
       {location?.address ? (
-        <div className="summary-meta">
-          <div className="location-row">
-            <MapPin size={14} />
-            <span>{location.address}</span>
+        <div className="worker-location-card success">
+          <div className="worker-location-line">
+            <MapPin size={16} />
+            <p>{formatAddressForDisplay(location.address)}</p>
           </div>
-          {Number.isFinite(Number(location.accuracy)) ? (
-            <div className="location-row">
-              <CheckCircle2 size={14} />
-              <span>{`Accuracy: ${formatAccuracy(location.accuracy)}`}</span>
+          {Number.isFinite(Number(location?.accuracy)) ? (
+            <div className="worker-location-line small">
+              <ShieldCheck size={16} />
+              <span>{`GPS Accuracy: ${formatAccuracyMeters(location.accuracy)}`}</span>
             </div>
           ) : null}
-          {location.timestamp ? (
-            <div className="location-row">
-              <Clock size={14} />
+          {location?.timestamp ? (
+            <div className="worker-location-line small">
+              <Clock3 size={16} />
               <span>{formatDateTime(location.timestamp)}</span>
             </div>
           ) : null}
@@ -764,698 +614,751 @@ const WorkerTasks = () => {
     </div>
   );
 
-  const renderBeforeSection = (task, draft) => (
-    <section className="task-stage-card">
-      <div className="stage-header">
+  const renderMetaCard = (task, stage) => (
+    <section className="worker-meta-card">
+      <div className="worker-meta-top">
         <div>
-          <p className="eyebrow">Before Work</p>
-          <h4>Capture the starting proof</h4>
+          <p className="worker-kicker">Assigned Civic Task</p>
+          <h3>{task.title}</h3>
         </div>
-        <span className="stage-chip">Pending</span>
+        <div className="worker-badges">
+          <span className={`worker-status-badge ${STATUS_COPY[stage].tone}`}>{STATUS_COPY[stage].badge}</span>
+          <span className={`worker-priority-badge ${String(task.priority || 'medium').toLowerCase()}`}>
+            {String(task.priority || 'medium').toUpperCase()}
+          </span>
+        </div>
       </div>
 
-      <div className="stage-body">
-        <button
-          type="button"
-          className="primary-action"
-          onClick={() => openCameraModal(task._id, 'before')}
-        >
-          <Camera size={18} />
-          {draft.beforePreview ? 'Open Camera' : 'Start Work'}
-        </button>
+      <div className="worker-meta-grid">
+        <div className="worker-meta-item">
+          <span>Department</span>
+          <strong>{task?.department_id?.name || 'Not assigned'}</strong>
+        </div>
+        <div className="worker-meta-item">
+          <span>Assigned By</span>
+          <strong>{getAssignedBy(task)}</strong>
+        </div>
+        <div className="worker-meta-item">
+          <span>Created Date</span>
+          <strong>{formatDateTime(task?.createdAt)}</strong>
+        </div>
+        <div className="worker-meta-item">
+          <span>Status</span>
+          <strong>{STATUS_COPY[stage].badge}</strong>
+        </div>
+      </div>
 
-        {renderDraftPreview('Before Photo', draft.beforePreview, draft.beforeLocation)}
-        {renderLocationBlock(
+      <div className="worker-address-card">
+        <MapPin size={16} />
+        <span>{getLocationAddress(task, 'Address unavailable')}</span>
+      </div>
+
+      <div className="worker-meta-footer">
+        <p>{STATUS_COPY[stage].text}</p>
+        <Link to={`/issues/${task._id}`} className="worker-detail-link">
+          Open issue details
+        </Link>
+      </div>
+    </section>
+  );
+
+  const renderBeforeSection = (task, draft) => (
+    <section className="worker-flow-card">
+      <div className="worker-flow-heading">
+        <div>
+          <p className="worker-kicker">Before Work</p>
+          <h4>Before Work Verification</h4>
+          <p>Capture live work-start proof with GPS verification</p>
+        </div>
+      </div>
+
+      <div className="worker-action-row">
+        <button type="button" className="worker-primary-button" onClick={() => triggerInput(task._id, 'before-camera')}>
+          <Camera size={18} />
+          Open Camera
+        </button>
+        <button type="button" className="worker-secondary-button" onClick={() => triggerInput(task._id, 'before-upload')}>
+          <Upload size={18} />
+          Upload Photo
+        </button>
+      </div>
+
+      {renderPreviewCard(
+        'Before Work Preview',
+        draft.beforePreview,
+        draft.beforeImageFile?.name || '',
+        renderLocationCard(
           draft.beforeLocation,
           draft.beforeLocationLoading,
-          draft.beforeLocationError
-        )}
+          draft.beforeLocationError,
+          () => void detectLiveLocation(task._id, 'before')
+        )
+      )}
 
-        {draft.formError ? <p className="inline-error">{draft.formError}</p> : null}
+      {draft.formError ? <p className="worker-form-error">{draft.formError}</p> : null}
 
-        <button
-          type="button"
-          className="submit-action"
-          disabled={!draft.beforeFile || !hasAccurateLocation(draft.beforeLocation) || draft.beforeSubmitting}
-          onClick={() => void submitBeforeWork(task)}
-        >
-          {draft.beforeSubmitting ? 'Submitting...' : 'Submit Before Work'}
-        </button>
-      </div>
+      <button
+        type="button"
+        className="worker-submit-button"
+        disabled={!draft.beforeImageFile || !hasAccurateLocation(draft.beforeLocation) || draft.beforeLocationLoading || draft.beforeSubmitting}
+        onClick={() => void submitBeforeWork(task)}
+      >
+        {draft.beforeSubmitting ? 'Submitting...' : 'Submit Before Work'}
+      </button>
     </section>
   );
 
   const renderAfterSection = (task, draft) => (
-    <section className="task-stage-card">
-      <div className="stage-header">
+    <section className="worker-flow-card">
+      <div className="worker-flow-heading">
         <div>
-          <p className="eyebrow">After Work</p>
-          <h4>Finish the task submission</h4>
+          <p className="worker-kicker">After Work</p>
+          <h4>After Work Submission</h4>
+          <p>Upload completed civic work proof</p>
         </div>
-        <span className="stage-chip progress">In Progress</span>
       </div>
 
-      <div className="stage-body">
-        <div className="action-grid">
-          <button
-            type="button"
-            className="primary-action"
-            onClick={() => openCameraModal(task._id, 'after')}
-          >
-            <Camera size={18} />
-            Open Camera
-          </button>
+      <div className="worker-split-grid">
+        <div className="worker-column">
+          <div className="worker-action-row compact">
+            <button type="button" className="worker-primary-button" onClick={() => triggerInput(task._id, 'after-camera')}>
+              <Camera size={18} />
+              Open Camera
+            </button>
+            <button type="button" className="worker-secondary-button" onClick={() => triggerInput(task._id, 'after-upload')}>
+              <Upload size={18} />
+              Upload Photo
+            </button>
+          </div>
 
-          <button
-            type="button"
-            className="secondary-action"
-            onClick={() => openFilePicker(task._id, 'bill')}
-          >
-            <Receipt size={18} />
-            Upload Bill Proof
-          </button>
+          {renderPreviewCard(
+            'After Work Image',
+            draft.afterPreview,
+            draft.afterImageFile?.name || '',
+            renderLocationCard(
+              draft.afterLocation,
+              draft.afterLocationLoading,
+              draft.afterLocationError,
+              () => void detectLiveLocation(task._id, 'after')
+            )
+          )}
         </div>
 
-        <div className="preview-grid">
-          {renderDraftPreview('After Photo', draft.afterPreview, draft.afterLocation)}
-          {renderDraftPreview('Bill Proof', draft.billPreview)}
+        <div className="worker-column">
+          <div className="worker-action-row compact">
+            <button type="button" className="worker-secondary-button" onClick={() => triggerInput(task._id, 'bill-upload')}>
+              <Receipt size={18} />
+              Upload Bill Copy
+            </button>
+          </div>
+
+          {renderPreviewCard(
+            'Bill Copy',
+            draft.billPreview,
+            draft.billImageFile?.name || '',
+            <div className="worker-location-card muted">
+              <span>Bill proof is required for final verification.</span>
+            </div>
+          )}
         </div>
-
-        {renderLocationBlock(
-          draft.afterLocation,
-          draft.afterLocationLoading,
-          draft.afterLocationError
-        )}
-
-        <div className="description-block">
-          <label htmlFor={`description-${task._id}`}>Description</label>
-          <textarea
-            id={`description-${task._id}`}
-            rows="4"
-            value={draft.description}
-            onChange={(event) => updateDraft(task._id, { description: event.target.value, formError: '' })}
-            placeholder="Describe the completed work..."
-          />
-        </div>
-
-        {draft.formError ? <p className="inline-error">{draft.formError}</p> : null}
-
-        <button
-          type="button"
-          className="submit-action"
-          disabled={!draft.afterFile || !draft.billFile || !hasAccurateLocation(draft.afterLocation) || !draft.description.trim() || draft.afterSubmitting}
-          onClick={() => void submitAfterWork(task)}
-        >
-          {draft.afterSubmitting ? 'Submitting...' : 'Submit After Work'}
-        </button>
       </div>
+
+      <div className="worker-description-block">
+        <label htmlFor={`description-${task._id}`}>Description</label>
+        <textarea
+          id={`description-${task._id}`}
+          rows="5"
+          value={draft.description}
+          onChange={(event) => updateDraft(task._id, { description: event.target.value, formError: '' })}
+          placeholder="Describe the completed civic maintenance work."
+        />
+      </div>
+
+      {draft.formError ? <p className="worker-form-error">{draft.formError}</p> : null}
+
+      <button
+        type="button"
+        className="worker-submit-button"
+        disabled={!draft.afterImageFile || !draft.billImageFile || !draft.description.trim() || !hasAccurateLocation(draft.afterLocation) || draft.afterLocationLoading || draft.afterSubmitting}
+        onClick={() => void submitAfterWork(task)}
+      >
+        {draft.afterSubmitting ? 'Submitting...' : 'Submit Completed Work'}
+      </button>
     </section>
   );
+
+  const renderWaitingSection = (task) => {
+    const isVerified = String(task?.status || '').toLowerCase() === 'verified';
+
+    return (
+      <section className="worker-message-card waiting">
+        <div className="worker-message-icon waiting">
+          <Clock3 size={22} />
+        </div>
+        <div>
+          <h4>{isVerified ? 'Verified and Waiting for Admin Closure' : 'Waiting for Department Verification'}</h4>
+          <p>
+            {isVerified
+              ? 'Department Head has verified this civic work. Admin will close the task next.'
+              : 'Department Head is reviewing your completed civic work.'}
+          </p>
+        </div>
+      </section>
+    );
+  };
 
   const renderCompletedSection = (task) => (
-    <section className="task-stage-card completed-card">
-      <div className="stage-header">
-        <div>
-          <p className="eyebrow">Completed Summary</p>
-          <h4>Read-only submission record</h4>
+    <section className="worker-message-card completed card-grid">
+      <div className="worker-message-row">
+        <div className="worker-message-icon completed">
+          <CheckCircle2 size={22} />
         </div>
-        <span className="stage-chip completed">
-          <CheckCircle2 size={14} />
-          Completed
-        </span>
+        <div>
+          <h4>Task Completed Successfully</h4>
+          <p>The civic workflow is complete. Review the final submission summary below.</p>
+        </div>
       </div>
 
-      <div className="summary-grid">
-        {renderStoredPreview('Before Work', getImageValue(task, 'before'), getLocationValue(task, 'before'))}
-        {renderStoredPreview('After Work', getImageValue(task, 'after'), getLocationValue(task, 'after'))}
-        {renderStoredPreview('Bill Proof', getImageValue(task, 'bill'), getLocationValue(task, 'bill'))}
-        <div className="summary-copy">
-          <span className="preview-label">Description</span>
-          <div className="summary-text-card">
-            <FileText size={18} />
-            <p>{task.afterWork?.description || task.workDescription || task.work_proof?.description || 'No description available.'}</p>
-          </div>
+      <div className="worker-summary-grid">
+        {renderStoredPreview('Before Work', getStoredImage(task, 'before'), getProofLocation(task, 'before'))}
+        {renderStoredPreview('After Work', getStoredImage(task, 'after'), getProofLocation(task, 'after'))}
+        {renderStoredPreview('Bill Proof', getStoredImage(task, 'bill'), getProofLocation(task, 'bill'))}
+      </div>
+
+      <div className="worker-location-card success">
+        <div className="worker-location-line">
+          <FileText size={16} />
+          <p>{getStoredDescription(task)}</p>
+        </div>
+        <div className="worker-location-line small">
+          <Clock3 size={16} />
+          <span>{formatDateTime(task?.updatedAt)}</span>
         </div>
       </div>
     </section>
   );
 
-  if (loading) {
-    return <div style={{ padding: '2rem' }}>Loading tasks...</div>;
-  }
-
   return (
-    <div className="fade-in worker-tasks-page">
-      <div className="worker-page-header">
+    <div className="fade-in worker-dashboard-page">
+      <header className="worker-dashboard-hero">
         <div>
-          <p className="page-kicker">Worker Tasks</p>
-          <h2>Assigned task workflow</h2>
-          <p className="page-subtitle">Only one section is shown at a time based on the current task status.</p>
+          <p className="worker-kicker">Worker Workflow</p>
+          <h2>My Assigned Tasks</h2>
+          <p>Track and complete civic maintenance workflow</p>
         </div>
-      </div>
+        <button type="button" className="worker-refresh-button" onClick={() => void fetchTasks()}>
+          <RefreshCw size={18} />
+          Refresh
+        </button>
+      </header>
 
-      {tasks.length === 0 ? (
-        <div className="glass empty-state-card">
-          <p>No tasks assigned to you yet.</p>
+      {loading ? (
+        <div className="worker-loading-card glass">
+          <Loader size={18} className="spin" />
+          <span>Loading assigned tasks...</span>
         </div>
-      ) : (
-        <div className="task-grid">
-          {tasks.map((task) => {
-            const draft = getDraft(task._id);
-            const stage = getWorkerStage(task);
-            const accent = getStageAccent(stage);
+      ) : null}
 
-            return (
-              <article key={task._id} className={`glass task-card ${accent}`}>
-                <input
-                  ref={(node) => {
-                    if (node) {
-                      fileInputRefs.current[`${task._id}:bill`] = node;
-                    }
-                  }}
-                  type="file"
-                  accept=".jpg,.jpeg,.png,image/png,image/jpeg"
-                  style={{ display: 'none' }}
-                  onChange={(event) => void handleFileChange(task._id, 'bill', event)}
-                />
-
-                <div className="task-card-top">
-                  <div>
-                    <div className="task-badges">
-                      <span className={`status-pill ${accent}`}>{getStageLabel(stage)}</span>
-                      <span className={`priority-tag ${task.priority}`}>{task.priority}</span>
-                    </div>
-                    <h3>{task.title}</h3>
-                  </div>
-                  <Link to={`/issues/${task._id}`} className="details-link">
-                    View Details
-                  </Link>
-                </div>
-
-                <div className="task-location">
-                  <MapPin size={14} />
-                  <span>{task.location?.address || task.address || 'Location unavailable'}</span>
-                </div>
-
-                {task.status === 'rework_required' ? (
-                  <div className="status-note warning">
-                    <AlertTriangle size={16} />
-                    <span>{task.verification?.comments || 'Rework requested. Please submit a fresh before-work proof.'}</span>
-                  </div>
-                ) : null}
-
-                {stage === 'PENDING' ? renderBeforeSection(task, draft) : null}
-                {stage === 'IN_PROGRESS' ? renderAfterSection(task, draft) : null}
-                {stage === 'COMPLETED' ? renderCompletedSection(task) : null}
-              </article>
-            );
-          })}
-        </div>
-      )}
-
-      {cameraModal.open ? (
-        <div className="camera-modal-backdrop" role="presentation" onClick={closeCameraModal}>
-          <div
-            className="camera-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label={cameraModal.field === 'after' ? 'After work camera' : 'Before work camera'}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="camera-modal-header">
-              <div>
-                <p className="eyebrow">{cameraModal.field === 'after' ? 'After Work' : 'Before Work'}</p>
-                <h4>Open Camera</h4>
-              </div>
-              <button type="button" className="camera-close-button" onClick={closeCameraModal}>
-                Close
-              </button>
-            </div>
-
-            <div className="camera-modal-body">
-              <div className="camera-preview-shell">
-                <video ref={videoRef} autoPlay muted playsInline className="camera-video" />
-                <canvas ref={canvasRef} className="camera-canvas" />
-              </div>
-
-              {cameraModal.starting ? (
-                <div className="camera-status">
-                  <RefreshCw size={14} className="spin" />
-                  <span>Starting camera...</span>
-                </div>
-              ) : null}
-
-              {cameraModal.error ? (
-                <div className="location-warning">
-                  <div className="location-warning-copy">
-                    <AlertTriangle size={16} />
-                    <span>{cameraModal.error}</span>
-                  </div>
-                </div>
-              ) : null}
-
-              <div className="camera-modal-actions">
-                <button
-                  type="button"
-                  className="primary-action"
-                  onClick={() => void capturePhoto()}
-                  disabled={cameraModal.starting || cameraModal.processing || !cameraStreamRef.current}
-                >
-                  <Camera size={18} />
-                  {cameraModal.processing ? 'Attaching Location...' : 'Capture'}
-                </button>
-                <button type="button" className="secondary-action" onClick={closeCameraModal}>
-                  Cancel
-                </button>
-              </div>
-            </div>
+      {!loading && tasks.length === 0 ? (
+        <div className="worker-empty-card glass">
+          <ShieldCheck size={22} />
+          <div>
+            <h3>No assigned tasks</h3>
+            <p>Your civic assignments will appear here once the Department Head assigns them.</p>
           </div>
         </div>
       ) : null}
 
+      <div className="worker-task-list">
+        {tasks.map((task) => {
+          const stage = getTaskStage(task);
+          const draft = getDraft(task._id);
+
+          return (
+            <article key={task._id} className={`worker-task-shell glass ${STATUS_COPY[stage].tone}`}>
+              <input
+                ref={(node) => { if (node) fileInputRefs.current[`${task._id}:before-camera`] = node; }}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                style={{ display: 'none' }}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = '';
+                  if (file) {
+                    void handleBeforeImage(task._id, file);
+                  }
+                }}
+              />
+              <input
+                ref={(node) => { if (node) fileInputRefs.current[`${task._id}:before-upload`] = node; }}
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = '';
+                  if (file) {
+                    void handleBeforeImage(task._id, file);
+                  }
+                }}
+              />
+              <input
+                ref={(node) => { if (node) fileInputRefs.current[`${task._id}:after-camera`] = node; }}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                style={{ display: 'none' }}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = '';
+                  if (file) {
+                    void handleAfterImage(task._id, file);
+                  }
+                }}
+              />
+              <input
+                ref={(node) => { if (node) fileInputRefs.current[`${task._id}:after-upload`] = node; }}
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = '';
+                  if (file) {
+                    void handleAfterImage(task._id, file);
+                  }
+                }}
+              />
+              <input
+                ref={(node) => { if (node) fileInputRefs.current[`${task._id}:bill-upload`] = node; }}
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = '';
+                  if (file) {
+                    handleBillImage(task._id, file);
+                  }
+                }}
+              />
+
+              {renderMetaCard(task, stage)}
+              {stage === 'PENDING' ? renderBeforeSection(task, draft) : null}
+              {stage === 'IN_PROGRESS' ? renderAfterSection(task, draft) : null}
+              {stage === 'WAITING_FOR_APPROVAL' ? renderWaitingSection(task) : null}
+              {stage === 'COMPLETED' ? renderCompletedSection(task) : null}
+            </article>
+          );
+        })}
+      </div>
+
       <style>{`
-        .worker-tasks-page {
+        .worker-dashboard-page {
           display: grid;
           gap: 1.5rem;
         }
 
-        .worker-page-header {
+        .worker-dashboard-hero {
           display: flex;
           justify-content: space-between;
           gap: 1rem;
           align-items: flex-start;
+          padding: 1.8rem;
+          border-radius: 30px;
+          background:
+            radial-gradient(circle at top right, rgba(14, 165, 233, 0.18), transparent 35%),
+            linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(240, 249, 255, 0.9));
+          border: 1px solid rgba(15, 23, 42, 0.08);
+          box-shadow: 0 30px 60px -46px rgba(15, 23, 42, 0.42);
         }
 
-        .page-kicker,
-        .eyebrow {
+        .worker-dashboard-hero h2 {
+          margin: 0;
+        }
+
+        .worker-dashboard-hero p:last-child {
+          margin-top: 0.55rem;
+          color: var(--text-muted);
+        }
+
+        .worker-kicker {
+          margin: 0 0 0.38rem;
           font-size: 0.78rem;
           text-transform: uppercase;
           letter-spacing: 0.14em;
           color: var(--text-muted);
-          margin-bottom: 0.35rem;
         }
 
-        .page-subtitle {
+        .worker-refresh-button,
+        .worker-primary-button,
+        .worker-secondary-button,
+        .worker-submit-button,
+        .worker-inline-button {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 0.55rem;
+          border-radius: 18px;
+          font-weight: 700;
+        }
+
+        .worker-refresh-button {
+          padding: 0.9rem 1rem;
+          background: rgba(255, 255, 255, 0.84);
+          border: 1px solid rgba(15, 23, 42, 0.08);
+          color: var(--text-main);
+        }
+
+        .worker-loading-card,
+        .worker-empty-card {
+          padding: 1.35rem 1.5rem;
+          border-radius: 24px;
+          display: flex;
+          align-items: center;
+          gap: 0.85rem;
+        }
+
+        .worker-empty-card p {
+          margin-top: 0.35rem;
           color: var(--text-muted);
-          margin-top: 0.5rem;
         }
 
-        .empty-state-card {
-          padding: 2rem;
-          text-align: center;
-        }
-
-        .task-grid {
+        .worker-task-list {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
           gap: 1.5rem;
         }
 
-        .task-card {
+        .worker-task-shell {
           padding: 1.5rem;
-          border-radius: 22px;
-          border: 1px solid var(--border);
+          border-radius: 28px;
+          display: grid;
+          gap: 1.2rem;
+          border: 1px solid rgba(15, 23, 42, 0.08);
+          box-shadow: 0 28px 54px -44px rgba(15, 23, 42, 0.38);
+        }
+
+        .worker-task-shell.pending {
+          background: linear-gradient(180deg, rgba(255, 251, 235, 0.9), rgba(255, 255, 255, 0.96));
+        }
+
+        .worker-task-shell.progress {
+          background: linear-gradient(180deg, rgba(239, 246, 255, 0.9), rgba(255, 255, 255, 0.96));
+        }
+
+        .worker-task-shell.waiting {
+          background: linear-gradient(180deg, rgba(240, 249, 255, 0.9), rgba(255, 255, 255, 0.96));
+        }
+
+        .worker-task-shell.completed {
+          background: linear-gradient(180deg, rgba(240, 253, 244, 0.92), rgba(255, 255, 255, 0.96));
+        }
+
+        .worker-meta-card,
+        .worker-flow-card,
+        .worker-message-card {
+          border-radius: 24px;
+          padding: 1.25rem;
+          background: rgba(255, 255, 255, 0.88);
+          border: 1px solid rgba(15, 23, 42, 0.08);
           display: grid;
           gap: 1rem;
-          position: relative;
-          overflow: hidden;
         }
 
-        .task-card.pending {
-          background: linear-gradient(180deg, rgba(245, 158, 11, 0.08), rgba(255, 255, 255, 0.92));
-        }
-
-        .task-card.progress {
-          background: linear-gradient(180deg, rgba(14, 165, 233, 0.08), rgba(255, 255, 255, 0.92));
-        }
-
-        .task-card.completed {
-          background: linear-gradient(180deg, rgba(16, 185, 129, 0.08), rgba(255, 255, 255, 0.92));
-        }
-
-        .task-card-top {
+        .worker-meta-top,
+        .worker-meta-footer,
+        .worker-flow-heading,
+        .worker-message-row {
           display: flex;
           justify-content: space-between;
           gap: 1rem;
           align-items: flex-start;
         }
 
-        .task-badges {
+        .worker-badges {
           display: flex;
-          gap: 0.65rem;
+          gap: 0.6rem;
           flex-wrap: wrap;
-          margin-bottom: 0.75rem;
+          justify-content: flex-end;
         }
 
-        .status-pill,
-        .stage-chip {
-          display: inline-flex;
-          align-items: center;
-          gap: 0.35rem;
-          padding: 0.42rem 0.8rem;
+        .worker-status-badge,
+        .worker-priority-badge {
+          padding: 0.45rem 0.8rem;
           border-radius: 999px;
-          font-size: 0.76rem;
-          font-weight: 700;
-          letter-spacing: 0.04em;
-          text-transform: uppercase;
+          font-size: 0.74rem;
+          font-weight: 800;
+          letter-spacing: 0.06em;
         }
 
-        .status-pill.pending,
-        .stage-chip {
+        .worker-status-badge.pending {
           background: rgba(245, 158, 11, 0.14);
           color: #b45309;
         }
 
-        .status-pill.progress,
-        .stage-chip.progress {
+        .worker-status-badge.progress {
           background: rgba(14, 165, 233, 0.14);
           color: #0369a1;
         }
 
-        .status-pill.completed,
-        .stage-chip.completed {
+        .worker-status-badge.waiting {
+          background: rgba(59, 130, 246, 0.12);
+          color: #1d4ed8;
+        }
+
+        .worker-status-badge.completed {
           background: rgba(16, 185, 129, 0.14);
           color: #047857;
         }
 
-        .details-link {
-          white-space: nowrap;
-          align-self: center;
-          font-weight: 600;
-          color: var(--primary);
-        }
-
-        .task-location,
-        .location-row,
-        .location-warning-copy,
-        .summary-text-card {
-          display: flex;
-          align-items: flex-start;
-          gap: 0.5rem;
-        }
-
-        .task-location,
-        .location-row,
-        .summary-meta,
-        .summary-text-card p {
-          color: var(--text-muted);
-        }
-
-        .status-note {
-          border-radius: 16px;
-          padding: 0.85rem 1rem;
-          display: flex;
-          align-items: flex-start;
-          gap: 0.55rem;
-          font-size: 0.92rem;
-        }
-
-        .status-note.warning {
-          background: rgba(245, 158, 11, 0.12);
-          border: 1px solid rgba(245, 158, 11, 0.22);
-          color: #b45309;
-        }
-
-        .task-stage-card {
-          border-radius: 20px;
-          border: 1px solid var(--border);
-          background: rgba(255, 255, 255, 0.78);
-          padding: 1.1rem;
-          display: grid;
-          gap: 1rem;
-          backdrop-filter: blur(12px);
-        }
-
-        .stage-header {
-          display: flex;
-          justify-content: space-between;
-          gap: 1rem;
-          align-items: flex-start;
-        }
-
-        .stage-body {
-          display: grid;
-          gap: 1rem;
-        }
-
-        .action-grid,
-        .preview-grid,
-        .summary-grid {
-          display: grid;
-          gap: 1rem;
-        }
-
-        .preview-grid,
-        .summary-grid {
-          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        }
-
-        .camera-modal-backdrop {
-          position: fixed;
-          inset: 0;
-          background: rgba(15, 23, 42, 0.82);
-          display: grid;
-          place-items: center;
-          padding: 1rem;
-          z-index: 50;
-        }
-
-        .camera-modal {
-          width: min(100%, 720px);
-          border-radius: 24px;
-          background: #0f172a;
-          color: white;
-          box-shadow: 0 24px 60px -24px rgba(15, 23, 42, 0.9);
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          display: grid;
-          gap: 1rem;
-          padding: 1.25rem;
-        }
-
-        .camera-modal-header,
-        .camera-modal-actions {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 1rem;
-        }
-
-        .camera-modal-body,
-        .camera-preview-shell {
-          display: grid;
-          gap: 1rem;
-        }
-
-        .camera-video {
-          width: 100%;
-          max-height: 60vh;
-          border-radius: 18px;
-          background: black;
-          object-fit: cover;
-        }
-
-        .camera-canvas {
-          display: none;
-        }
-
-        .camera-status {
-          display: inline-flex;
-          align-items: center;
-          gap: 0.5rem;
-          color: rgba(255, 255, 255, 0.78);
-        }
-
-        .camera-close-button {
-          border-radius: 999px;
-          padding: 0.55rem 0.85rem;
-          background: rgba(255, 255, 255, 0.1);
-          color: white;
-          border: 1px solid rgba(255, 255, 255, 0.12);
-        }
-
-        .primary-action,
-        .secondary-action,
-        .submit-action,
-        .mini-action {
-          border-radius: 16px;
-          padding: 0.9rem 1rem;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 0.6rem;
-          font-weight: 600;
-        }
-
-        .primary-action {
-          background: linear-gradient(135deg, #0f766e, #0ea5e9);
-          color: white;
-          box-shadow: 0 14px 28px -20px rgba(14, 165, 233, 0.9);
-        }
-
-        .secondary-action {
-          background: rgba(15, 23, 42, 0.06);
-          color: var(--text-main);
-          border: 1px solid var(--border);
-        }
-
-        .submit-action {
-          background: #111827;
-          color: white;
-        }
-
-        .submit-action:disabled {
-          cursor: not-allowed;
-          opacity: 0.55;
-        }
-
-        .mini-action {
-          padding: 0.55rem 0.8rem;
-          background: rgba(245, 158, 11, 0.14);
-          color: #b45309;
-        }
-
-        .preview-shell,
-        .summary-copy {
-          display: grid;
-          gap: 0.6rem;
-        }
-
-        .preview-meta {
-          display: grid;
-          gap: 0.45rem;
-          max-width: 240px;
-          border-radius: 16px;
-          border: 1px solid var(--border);
-          padding: 0.75rem 0.85rem;
-          background: rgba(255, 255, 255, 0.86);
-        }
-
-        .preview-label {
-          font-size: 0.82rem;
-          font-weight: 700;
-          color: var(--text-muted);
-          text-transform: uppercase;
-          letter-spacing: 0.08em;
-        }
-
-        .preview-card {
-          max-width: 240px;
-          width: 100%;
-          border-radius: 18px;
-          overflow: hidden;
-          border: 1px solid rgba(15, 23, 42, 0.08);
-          background: white;
-          box-shadow: 0 18px 30px -24px rgba(15, 23, 42, 0.45);
-        }
-
-        .preview-image {
-          display: block;
-          width: 100%;
-          height: auto;
-          max-height: 220px;
-          object-fit: cover;
-        }
-
-        .preview-empty {
-          max-width: 240px;
-          min-height: 140px;
-          border-radius: 18px;
-          border: 1px dashed var(--border);
-          display: grid;
-          place-items: center;
-          padding: 1rem;
-          text-align: center;
-          color: var(--text-muted);
-          background: rgba(148, 163, 184, 0.08);
-        }
-
-        .location-pill,
-        .location-card,
-        .location-warning,
-        .summary-meta,
-        .summary-text-card {
-          border-radius: 16px;
-          border: 1px solid var(--border);
-          padding: 0.85rem 0.95rem;
-          background: rgba(255, 255, 255, 0.8);
-        }
-
-        .location-pill,
-        .location-warning {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 0.75rem;
-        }
-
-        .location-loading {
-          color: #0369a1;
-        }
-
-        .location-warning {
-          background: rgba(254, 249, 195, 0.7);
-          border-color: rgba(245, 158, 11, 0.28);
-          color: #92400e;
-        }
-
-        .inline-error {
-          color: var(--danger);
-          font-size: 0.92rem;
-        }
-
-        .description-block {
-          display: grid;
-          gap: 0.55rem;
-        }
-
-        .description-block label {
-          font-weight: 600;
-        }
-
-        .description-block textarea {
-          min-height: 110px;
-          resize: vertical;
-        }
-
-        .summary-media {
-          display: grid;
-          gap: 0.6rem;
-        }
-
-        .summary-meta,
-        .summary-text-card {
-          display: grid;
-          gap: 0.45rem;
-        }
-
-        .summary-text-card {
-          grid-template-columns: 18px 1fr;
-        }
-
-        .completed-card {
-          background: rgba(240, 253, 244, 0.75);
-        }
-
-        .priority-tag {
-          font-size: 0.7rem;
-          font-weight: 700;
-          padding: 0.18rem 0.55rem;
-          border-radius: 999px;
-          text-transform: uppercase;
-        }
-
-        .priority-tag.high {
+        .worker-priority-badge.high {
           background: rgba(244, 63, 94, 0.12);
           color: #be123c;
         }
 
-        .priority-tag.medium {
+        .worker-priority-badge.medium {
           background: rgba(245, 158, 11, 0.14);
           color: #b45309;
         }
 
-        .priority-tag.low {
+        .worker-priority-badge.low {
           background: rgba(16, 185, 129, 0.14);
+          color: #047857;
+        }
+
+        .worker-meta-grid,
+        .worker-summary-grid,
+        .worker-split-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+          gap: 0.9rem;
+        }
+
+        .worker-meta-item {
+          border-radius: 18px;
+          padding: 0.9rem;
+          background: rgba(248, 250, 252, 0.92);
+          border: 1px solid rgba(148, 163, 184, 0.16);
+          display: grid;
+          gap: 0.3rem;
+        }
+
+        .worker-meta-item span {
+          font-size: 0.82rem;
+          color: var(--text-muted);
+        }
+
+        .worker-address-card {
+          display: flex;
+          align-items: flex-start;
+          gap: 0.55rem;
+          padding: 0.9rem 1rem;
+          border-radius: 18px;
+          background: rgba(248, 250, 252, 0.94);
+          border: 1px solid rgba(148, 163, 184, 0.16);
+          color: var(--text-muted);
+        }
+
+        .worker-meta-footer p,
+        .worker-flow-heading p {
+          margin: 0.25rem 0 0;
+          color: var(--text-muted);
+        }
+
+        .worker-detail-link {
+          font-weight: 700;
+          color: var(--primary);
+          white-space: nowrap;
+        }
+
+        .worker-action-row,
+        .worker-preview-card,
+        .worker-description-block,
+        .worker-column {
+          display: grid;
+          gap: 1rem;
+        }
+
+        .worker-action-row {
+          grid-template-columns: repeat(auto-fit, minmax(180px, max-content));
+        }
+
+        .worker-action-row.compact {
+          grid-template-columns: repeat(auto-fit, minmax(160px, max-content));
+        }
+
+        .worker-primary-button {
+          padding: 0.95rem 1rem;
+          background: linear-gradient(135deg, #0f766e, #0284c7);
+          color: white;
+          box-shadow: 0 20px 32px -24px rgba(2, 132, 199, 0.72);
+        }
+
+        .worker-secondary-button {
+          padding: 0.95rem 1rem;
+          background: rgba(255, 255, 255, 0.92);
+          border: 1px solid rgba(148, 163, 184, 0.24);
+          color: var(--text-main);
+        }
+
+        .worker-submit-button {
+          padding: 0.95rem 1.2rem;
+          background: #0f172a;
+          color: white;
+          width: fit-content;
+          min-width: 220px;
+        }
+
+        .worker-submit-button:disabled {
+          opacity: 0.55;
+          cursor: not-allowed;
+        }
+
+        .worker-section-label {
+          font-size: 0.78rem;
+          font-weight: 800;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: var(--text-muted);
+        }
+
+        .worker-proof-image,
+        .worker-empty-preview {
+          width: 100%;
+          max-width: 200px;
+          border-radius: 18px;
+          box-shadow: 0 18px 28px -22px rgba(15, 23, 42, 0.45);
+        }
+
+        .worker-proof-image {
+          display: block;
+          object-fit: cover;
+          border: 1px solid rgba(15, 23, 42, 0.08);
+        }
+
+        .worker-empty-preview {
+          min-height: 150px;
+          display: grid;
+          place-items: center;
+          padding: 1rem;
+          text-align: center;
+          background: rgba(241, 245, 249, 0.9);
+          border: 1px dashed rgba(148, 163, 184, 0.34);
+          color: var(--text-muted);
+        }
+
+        .worker-file-name {
+          margin: 0;
+          color: var(--text-muted);
+          word-break: break-word;
+        }
+
+        .worker-location-card {
+          border-radius: 18px;
+          padding: 0.9rem 1rem;
+          border: 1px solid rgba(148, 163, 184, 0.18);
+          background: rgba(248, 250, 252, 0.92);
+        }
+
+        .worker-location-card.info {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.55rem;
+          color: #0369a1;
+        }
+
+        .worker-location-card.warning {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 0.75rem;
+          background: rgba(254, 249, 195, 0.8);
+          border-color: rgba(245, 158, 11, 0.22);
+          color: #92400e;
+        }
+
+        .worker-location-card.success {
+          background: rgba(236, 253, 245, 0.82);
+          border-color: rgba(16, 185, 129, 0.2);
+        }
+
+        .worker-location-card.muted {
+          color: var(--text-muted);
+        }
+
+        .worker-location-line {
+          display: flex;
+          align-items: flex-start;
+          gap: 0.55rem;
+          color: var(--text-main);
+        }
+
+        .worker-location-line p {
+          margin: 0;
+          white-space: pre-line;
+        }
+
+        .worker-location-line.small {
+          margin-top: 0.75rem;
+          color: var(--text-muted);
+        }
+
+        .worker-inline-button {
+          padding: 0.45rem 0.75rem;
+          background: rgba(255, 255, 255, 0.9);
+          color: #92400e;
+        }
+
+        .worker-description-block label {
+          font-weight: 700;
+        }
+
+        .worker-description-block textarea {
+          width: 100%;
+          min-height: 130px;
+          border-radius: 18px;
+          border: 1px solid rgba(148, 163, 184, 0.26);
+          background: white;
+          padding: 1rem;
+          resize: vertical;
+        }
+
+        .worker-form-error {
+          margin: 0;
+          color: var(--danger);
+          font-weight: 600;
+        }
+
+        .worker-message-card.waiting {
+          display: flex;
+          align-items: center;
+          gap: 1rem;
+          background: rgba(239, 246, 255, 0.92);
+        }
+
+        .worker-message-card.completed {
+          display: grid;
+          gap: 1rem;
+          background: rgba(236, 253, 245, 0.92);
+        }
+
+        .worker-message-icon {
+          width: 3rem;
+          height: 3rem;
+          border-radius: 18px;
+          display: grid;
+          place-items: center;
+          flex-shrink: 0;
+        }
+
+        .worker-message-icon.waiting {
+          background: rgba(59, 130, 246, 0.12);
+          color: #1d4ed8;
+        }
+
+        .worker-message-icon.completed {
+          background: rgba(16, 185, 129, 0.12);
           color: #047857;
         }
 
@@ -1468,30 +1371,33 @@ const WorkerTasks = () => {
           to { transform: rotate(360deg); }
         }
 
-        @media (max-width: 760px) {
-          .task-card-top,
-          .stage-header,
-          .camera-modal-header,
-          .camera-modal-actions,
-          .location-pill,
-          .location-warning {
+        @media (max-width: 780px) {
+          .worker-dashboard-hero,
+          .worker-meta-top,
+          .worker-meta-footer,
+          .worker-flow-heading,
+          .worker-message-row,
+          .worker-message-card.waiting {
             flex-direction: column;
           }
 
-          .details-link {
-            align-self: flex-start;
+          .worker-badges {
+            justify-content: flex-start;
           }
 
-          .preview-grid,
-          .summary-grid,
-          .task-grid {
+          .worker-action-row,
+          .worker-action-row.compact,
+          .worker-meta-grid,
+          .worker-summary-grid,
+          .worker-split-grid {
             grid-template-columns: 1fr;
           }
 
-          .preview-card,
-          .preview-empty,
-          .preview-meta {
-            max-width: 100%;
+          .worker-refresh-button,
+          .worker-primary-button,
+          .worker-secondary-button,
+          .worker-submit-button {
+            width: 100%;
           }
         }
       `}</style>

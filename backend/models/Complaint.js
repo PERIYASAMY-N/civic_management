@@ -54,6 +54,12 @@ const complaintSchema = new mongoose.Schema({
   },
   beforeWork: {
     image: String,
+    location: {
+      lat: Number,
+      lng: Number,
+      address: String
+    },
+    submittedAt: Date,
     lat: Number,
     lng: Number,
     accuracy: Number,
@@ -64,6 +70,12 @@ const complaintSchema = new mongoose.Schema({
     image: String,
     billImage: String,
     description: String,
+    location: {
+      lat: Number,
+      lng: Number,
+      address: String
+    },
+    submittedAt: Date,
     lat: Number,
     lng: Number,
     accuracy: Number,

@@ -20,7 +20,7 @@ const auth = async (req, res, next) => {
     }
 
     req.user = {
-      id: user._id,
+      id: user._id.toString(),
       role: normalizeRole(user.role),
       department_id: user.department_id,
       status: user.status

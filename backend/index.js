@@ -9,7 +9,7 @@ const authRoutes = require('./routes/auth');
 const app = express();
 
 // Ensure upload directories exist
-['id-proofs', 'issues', 'proofs', 'profile'].forEach((directory) => {
+['id-proofs', 'issues', 'proofs', 'profile', 'tasks'].forEach((directory) => {
   const uploadDir = path.join(__dirname, 'uploads', directory);
   if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
@@ -22,7 +22,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cors({
   origin: true, // Allow any origin
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
 }));
 
 // Serve static files
@@ -53,8 +53,10 @@ app.use((req, res) => {
 // Global Error Handler
 app.use((err, req, res, next) => {
   console.error(`[UNHANDLED ERROR] ${new Date().toISOString()}:`, err);
-  res.status(500).json({ 
-    message: 'Internal Server Error', 
+  const statusCode = err.name === 'MulterError' ? 400 : (err.status || 500);
+  res.status(statusCode).json({ 
+    success: false,
+    message: err.message || 'Internal Server Error', 
     error: err.message,
     stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
   });
