@@ -23,7 +23,12 @@ const complaintSchema = new mongoose.Schema({
       'waiting_for_verification',
       'verified',
       'rework_required',
-      'completed'
+      'completed',
+      'closed',
+      'PENDING',
+      'IN_PROGRESS',
+      'COMPLETED',
+      'CLOSED'
     ], 
     default: 'pending' 
   },
@@ -116,6 +121,8 @@ const complaintSchema = new mongoose.Schema({
     verified_at: Date,
     comments: String
   },
+  verifiedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  verifiedAt: Date,
   image_context: {
     source: { type: String },
     captured_at: { type: Date },

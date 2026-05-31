@@ -5,7 +5,7 @@ const { getRoleValues } = require('../utils/userAccess');
 
 const router = express.Router();
 
-const COMPLETED_STATUS = 'completed';
+const COMPLETED_STATUSES = ['completed', 'closed'];
 const IN_PROGRESS_STATUSES = ['in_progress', 'waiting_for_head', 'waiting_for_verification', 'rework_required', 'verified'];
 const PENDING_STATUSES = ['pending', 'assigned_to_dept', 'assigned_to_worker'];
 
@@ -13,6 +13,14 @@ const roundPercentage = (completed, total) => {
   if (!total) return 0;
   return Number(((completed / total) * 100).toFixed(1));
 };
+
+const normalizedStatusExpression = (fieldPath) => ({
+  $toLower: { $ifNull: [fieldPath, ''] }
+});
+
+const statusInExpression = (fieldPath, statuses) => ({
+  $in: [normalizedStatusExpression(fieldPath), statuses]
+});
 
 const getDepartmentPerformance = async () => {
   const workerRoles = getRoleValues('worker');
@@ -41,17 +49,17 @@ const getDepartmentPerformance = async () => {
           totalIssues: { $sum: 1 },
           completed: {
             $sum: {
-              $cond: [{ $eq: ['$status', COMPLETED_STATUS] }, 1, 0]
+              $cond: [statusInExpression('$status', COMPLETED_STATUSES), 1, 0]
             }
           },
           inProgress: {
             $sum: {
-              $cond: [{ $in: ['$status', IN_PROGRESS_STATUSES] }, 1, 0]
+              $cond: [statusInExpression('$status', IN_PROGRESS_STATUSES), 1, 0]
             }
           },
           pending: {
             $sum: {
-              $cond: [{ $in: ['$status', PENDING_STATUSES] }, 1, 0]
+              $cond: [statusInExpression('$status', PENDING_STATUSES), 1, 0]
             }
           }
         }
@@ -102,7 +110,9 @@ router.get('/overview', async (req, res) => {
   try {
     const [totalIssues, totalResolved] = await Promise.all([
       Complaint.countDocuments(),
-      Complaint.countDocuments({ status: COMPLETED_STATUS })
+      Complaint.countDocuments({
+        $expr: statusInExpression('$status', COMPLETED_STATUSES)
+      })
     ]);
 
     res.json({
@@ -171,7 +181,7 @@ router.get('/top-workers', async (req, res) => {
     const topWorkers = await Complaint.aggregate([
       {
         $match: {
-          status: COMPLETED_STATUS,
+          $expr: statusInExpression('$status', COMPLETED_STATUSES),
           assigned_worker_id: { $ne: null }
         }
       },

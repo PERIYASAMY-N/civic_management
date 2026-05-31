@@ -2,12 +2,23 @@ const mongoose = require('mongoose');
 const Complaint = require('../models/Complaint');
 require('dotenv').config();
 
+const COMPLETED_STATUSES = ['completed', 'closed'];
+
 const escalateComplaints = async () => {
   try {
     await mongoose.connect(process.env.MONGODB_URI);
     
     const overdue = await Complaint.find({
-      status: { $ne: 'completed' },
+      $expr: {
+        $not: [
+          {
+            $in: [
+              { $toLower: { $ifNull: ['$status', ''] } },
+              COMPLETED_STATUSES
+            ]
+          }
+        ]
+      },
       sla_expiry: { $lt: new Date() }
     });
 

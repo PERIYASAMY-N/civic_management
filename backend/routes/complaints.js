@@ -10,6 +10,7 @@ const upload = require('../middleware/upload');
 const { auth, authorize } = require('../middleware/auth');
 const { getRoleValues, getStatusValues, hasRole, hasStatus } = require('../utils/userAccess');
 const { reverseGeocodeCoordinates } = require('../utils/geocoding');
+const { io } = require('../utils/realtime');
 
 const ISSUE_UPLOAD_DIRECTORY = path.join(__dirname, '..', 'uploads', 'issues');
 const PROOF_UPLOAD_DIRECTORY = path.join(__dirname, '..', 'uploads', 'proofs');
@@ -22,6 +23,7 @@ const WORKER_WAITING_FOR_HEAD_STATUS = 'waiting_for_head';
 const LEGACY_WORKER_REVIEW_STATUS = 'waiting_for_verification';
 const WORKER_REVIEW_STATUSES = [WORKER_WAITING_FOR_HEAD_STATUS, LEGACY_WORKER_REVIEW_STATUS];
 const ADMIN_CLOSABLE_STATUS = 'verified';
+const ADMIN_CLOSED_STATUS = 'CLOSED';
 const LOCATION_MAX_ACCURACY_METERS = 200;
 const TASK_POPULATION = [
   ['created_by', 'name'],
@@ -115,6 +117,7 @@ const getUploadedFile = (files, fieldNames) => {
 };
 
 const normalizeBodyString = (value) => (typeof value === 'string' ? value.trim() : '');
+const normalizeStatus = (status) => String(status || '').toLowerCase();
 
 const toUploadedPath = (file) => {
   if (!file?.filename) {
@@ -290,6 +293,12 @@ const buildImageContext = (rawImageContext, location, imageSource) => {
   };
 };
 
+const emitTaskUpdated = (updatedTask) => {
+  if (updatedTask) {
+    io.emit('taskUpdated', updatedTask);
+  }
+};
+
 const createNotification = async ({ userId, title, message, type = 'INFO', complaintId }) => {
   if (!userId || !message) {
     return null;
@@ -311,7 +320,8 @@ const createNotification = async ({ userId, title, message, type = 'INFO', compl
     return null;
   }
 
-  return Notification.create({
+  const notification = await Notification.create({
+    userId,
     user_id: userId,
     title,
     message,
@@ -320,6 +330,9 @@ const createNotification = async ({ userId, title, message, type = 'INFO', compl
     status: 'unread',
     read: false
   });
+
+  io.toUser(userId).emit('notificationCreated', notification);
+  return notification;
 };
 
 const notifyCitizen = async (complaint, status) => {
@@ -658,6 +671,7 @@ const submitBeforeWork = async (req, res) => {
 
     await complaint.save();
     const task = await loadTaskForResponse(complaint._id);
+    emitTaskUpdated(task);
     await notifyCitizen(complaint, 'in_progress');
     await createNotificationsForUsers({
       userIds: await getDepartmentHeadIds(complaint.department_id),
@@ -766,6 +780,7 @@ const submitAfterWork = async (req, res) => {
 
     await complaint.save();
     const task = await loadTaskForResponse(complaint._id);
+    emitTaskUpdated(task);
 
     const departmentHeadIds = await getDepartmentHeadIds(complaint.department_id);
     await createNotificationsForUsers({
@@ -838,6 +853,7 @@ router.post('/', auth, imageUpload.single('imageFile'), async (req, res) => {
     });
 
     await complaint.save();
+    emitTaskUpdated(complaint);
     res.status(201).json(complaint);
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
@@ -894,7 +910,10 @@ router.post('/assign-dept/:id', auth, authorize('admin'), async (req, res) => {
     });
     await complaint.save();
 
-    res.json({ message: 'Complaint assigned to department', complaint });
+    const task = await loadTaskForResponse(complaint._id);
+    emitTaskUpdated(task);
+
+    res.json({ message: 'Complaint assigned to department', complaint: task, task });
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
   }
@@ -951,7 +970,10 @@ router.post('/assign/:id', auth, authorize('head'), async (req, res) => {
 
     await notifyCitizen(complaint, 'assigned_to_worker');
 
-    res.json({ message: 'Task assigned successfully', complaint });
+    const task = await loadTaskForResponse(complaint._id);
+    emitTaskUpdated(task);
+
+    res.json({ message: 'Task assigned successfully', complaint: task, task });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }
@@ -984,9 +1006,9 @@ router.get('/verification-queue', auth, authorize('head'), async (req, res) => {
   }
 });
 
-router.post('/verify/:id', auth, authorize('head'), async (req, res) => {
+const reviewByDepartmentHead = async (req, res) => {
   try {
-    const action = String(req.body.action || '').trim().toLowerCase();
+    const action = String(req.body.action || 'approve').trim().toLowerCase();
     const comments = String(req.body.comments || '').trim();
     const complaint = await Complaint.findById(req.params.id);
 
@@ -998,7 +1020,7 @@ router.post('/verify/:id', auth, authorize('head'), async (req, res) => {
       return res.status(403).json({ message: 'You can only verify work from your own department' });
     }
 
-    if (!WORKER_REVIEW_STATUSES.includes(complaint.status)) {
+    if (!WORKER_REVIEW_STATUSES.includes(normalizeStatus(complaint.status))) {
       return res.status(400).json({ message: 'Only tasks waiting for department head review can be reviewed' });
     }
 
@@ -1025,6 +1047,8 @@ router.post('/verify/:id', auth, authorize('head'), async (req, res) => {
     });
 
     await complaint.save();
+    const task = await loadTaskForResponse(complaint._id);
+    emitTaskUpdated(task);
 
     if (approved) {
       const adminIds = await getAdminIds();
@@ -1036,7 +1060,7 @@ router.post('/verify/:id', auth, authorize('head'), async (req, res) => {
         complaintId: complaint._id
       });
 
-      return res.json({ message: 'Issue verified successfully', complaint });
+      return res.json({ message: 'Issue verified successfully', complaint: task, task });
     }
 
     await createNotificationsForUsers({
@@ -1047,13 +1071,17 @@ router.post('/verify/:id', auth, authorize('head'), async (req, res) => {
       complaintId: complaint._id
     });
 
-    res.json({ message: 'Issue sent back for rework', complaint });
-  } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
+    res.json({ message: 'Issue sent back for rework', complaint: task, task });
+  } catch (error) {
+    console.error(error);
+    return res.status(error.status || 500).json({
+      success: false,
+      message: error.message
+    });
   }
-});
+};
 
-router.post('/close/:id', auth, authorize('admin'), async (req, res) => {
+const verifyByAdmin = async (req, res) => {
   try {
     const comments = String(req.body.comments || '').trim();
     const complaint = await Complaint.findById(req.params.id);
@@ -1062,25 +1090,60 @@ router.post('/close/:id', auth, authorize('admin'), async (req, res) => {
       return res.status(404).json({ message: 'Complaint not found' });
     }
 
-    if (complaint.status !== ADMIN_CLOSABLE_STATUS) {
+    if (normalizeStatus(complaint.status) !== ADMIN_CLOSABLE_STATUS) {
       return res.status(400).json({ message: 'Only verified issues can be closed by admin' });
     }
 
-    complaint.status = 'completed';
+    complaint.status = ADMIN_CLOSED_STATUS;
+    complaint.verifiedBy = req.user.id;
+    complaint.verifiedAt = new Date();
     complaint.timeline.push({
-      status: 'completed',
+      status: ADMIN_CLOSED_STATUS,
       updated_by: req.user.id,
-      comments: comments || 'Admin closed the issue after department verification'
+      comments: comments || 'Admin verified and closed the issue after department approval'
     });
 
     await complaint.save();
     await notifyCitizen(complaint, 'completed');
+    await createNotificationsForUsers({
+      userIds: await getDepartmentHeadIds(complaint.department_id),
+      title: 'Issue verified by admin',
+      message: `Admin verified and closed "${complaint.title}".`,
+      type: 'SUCCESS',
+      complaintId: complaint._id
+    });
+    await createNotificationsForUsers({
+      userIds: getAssignedUserIds(complaint),
+      title: 'Task verified by admin',
+      message: `Admin verified and closed "${complaint.title}".`,
+      type: 'SUCCESS',
+      complaintId: complaint._id
+    });
+    const task = await loadTaskForResponse(complaint._id);
+    emitTaskUpdated(task);
 
-    res.json({ message: 'Issue closed successfully', complaint });
-  } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
+    res.json({ success: true, message: 'Issue verified and closed successfully', complaint: task, task });
+  } catch (error) {
+    console.error(error);
+    return res.status(error.status || 500).json({
+      success: false,
+      message: error.message
+    });
   }
-});
+};
+
+const verifyTask = async (req, res) => {
+  if (hasRole(req.user.role, 'admin')) {
+    return verifyByAdmin(req, res);
+  }
+
+  return reviewByDepartmentHead(req, res);
+};
+
+router.patch('/:id/verify', auth, authorize('admin', 'head'), verifyTask);
+router.patch('/tasks/:id/verify', auth, authorize('admin', 'head'), verifyTask);
+router.post('/verify/:id', auth, authorize('head'), reviewByDepartmentHead);
+router.post('/close/:id', auth, authorize('admin'), verifyByAdmin);
 
 // Get Dept Specific Issues (Unassigned)
 router.get('/dept-issues', auth, authorize('head'), async (req, res) => {

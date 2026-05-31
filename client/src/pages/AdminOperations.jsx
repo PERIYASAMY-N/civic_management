@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import api, { resolveApiAssetUrl } from '../api';
 import {
   Building,
@@ -11,6 +11,16 @@ import {
   Users
 } from 'lucide-react';
 import { getRoleLabel, hasRole } from '../utils/userAccess';
+import socket from '../realtime/socket';
+
+const getApiErrorMessage = (error, fallback) => (
+  error.response?.data?.message
+  || error.response?.data?.error
+  || error.message
+  || fallback
+);
+
+const normalizeStatus = (status) => String(status || '').toLowerCase();
 
 const getProofImage = (issue, stage) => (
   stage === 'before'
@@ -51,7 +61,7 @@ const AdminOperations = () => {
   const [showDeptModal, setShowDeptModal] = useState(false);
   const [newDept, setNewDept] = useState({ name: '', department_id: '', head_id: '' });
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const [pendingRes, departmentsRes, complaintsRes] = await Promise.all([
@@ -64,24 +74,34 @@ const AdminOperations = () => {
       setPendingUsers(Array.isArray(pendingRes.data) ? pendingRes.data : []);
       setDepartments(Array.isArray(departmentsRes.data) ? departmentsRes.data : []);
       setUnassignedIssues(complaints.filter((issue) => !issue.department_id));
-      setVerifiedIssues(complaints.filter((issue) => issue.status === 'verified'));
+      setVerifiedIssues(complaints.filter((issue) => normalizeStatus(issue.status) === 'verified'));
     } catch (err) {
       console.error('Error fetching admin operations data', err);
+      alert(getApiErrorMessage(err, 'Unable to load admin operations data'));
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    void fetchData();
-  }, []);
+    const timerId = window.setTimeout(() => {
+      void fetchData();
+    }, 0);
+
+    return () => window.clearTimeout(timerId);
+  }, [fetchData]);
+
+  useEffect(() => {
+    socket.on('taskUpdated', fetchData);
+    return () => socket.off('taskUpdated', fetchData);
+  }, [fetchData]);
 
   const handleUserAction = async (id, action) => {
     try {
       await api.post(`/admin/users/${action}/${id}`);
       await fetchData();
-    } catch {
-      alert('Action failed');
+    } catch (error) {
+      alert(getApiErrorMessage(error, 'Action failed'));
     }
   };
 
@@ -91,18 +111,21 @@ const AdminOperations = () => {
     try {
       await api.post(`/complaints/assign-dept/${issueId}`, { department_id: deptId });
       await fetchData();
-    } catch {
-      alert('Assignment failed');
+    } catch (error) {
+      alert(getApiErrorMessage(error, 'Assignment failed'));
     }
   };
 
   const handleCloseIssue = async (issueId) => {
     try {
-      await api.post(`/complaints/close/${issueId}`);
-      alert('Issue closed successfully.');
+      await api.patch(`/issues/${issueId}/verify`, {
+        action: 'verify',
+        comments: 'Admin verified final work proof'
+      });
+      alert('Issue verified and closed successfully.');
       await fetchData();
     } catch (error) {
-      alert(error.response?.data?.message || 'Unable to close this issue');
+      alert(getApiErrorMessage(error, 'Unable to verify this issue'));
     }
   };
 
@@ -113,8 +136,8 @@ const AdminOperations = () => {
       setShowDeptModal(false);
       setNewDept({ name: '', department_id: '', head_id: '' });
       await fetchData();
-    } catch {
-      alert('Department creation failed');
+    } catch (error) {
+      alert(getApiErrorMessage(error, 'Department creation failed'));
     }
   };
 
@@ -220,7 +243,7 @@ const AdminOperations = () => {
                       <p>{issue.assigned_worker_id?.name || 'Worker not assigned'}</p>
                       <p>{issue.location?.address || issue.address || 'Location unavailable'}</p>
                     </div>
-                    <span className={`status-badge ${issue.status}`}>Verified</span>
+                    <span className={`status-badge ${normalizeStatus(issue.status)}`}>Verified</span>
                   </div>
 
                   <div className="proof-grid">
@@ -234,7 +257,7 @@ const AdminOperations = () => {
                     style={{ justifyContent: 'center' }}
                     onClick={() => void handleCloseIssue(issue._id)}
                   >
-                    Mark as Completed
+                    Verify & Close
                   </button>
                 </article>
               ))

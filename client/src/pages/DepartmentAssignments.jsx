@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import api, { resolveApiAssetUrl } from '../api';
 import {
   CheckCircle2,
@@ -9,6 +9,16 @@ import {
   XCircle
 } from 'lucide-react';
 import { hasRole } from '../utils/userAccess';
+import socket from '../realtime/socket';
+
+const getApiErrorMessage = (error, fallback) => (
+  error.response?.data?.message
+  || error.response?.data?.error
+  || error.message
+  || fallback
+);
+
+const normalizeStatus = (status) => String(status || '').toLowerCase();
 
 const getProofImage = (issue, stage) => (
   stage === 'before'
@@ -49,7 +59,7 @@ const DepartmentAssignments = () => {
   const [assignment, setAssignment] = useState({ worker_id: '', volunteer_id: '', comments: '' });
   const [reviewNotes, setReviewNotes] = useState({});
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       const [issuesRes, staffRes, pendingRes, verificationRes] = await Promise.all([
         api.get('/complaints/dept-issues'),
@@ -65,8 +75,9 @@ const DepartmentAssignments = () => {
       setVerificationQueue(Array.isArray(verificationRes.data) ? verificationRes.data : []);
     } catch (error) {
       console.error('Error fetching department assignment data', error);
+      alert(getApiErrorMessage(error, 'Unable to load department assignment data'));
     }
-  };
+  }, []);
 
   useEffect(() => {
     const timerId = window.setTimeout(() => {
@@ -74,7 +85,12 @@ const DepartmentAssignments = () => {
     }, 0);
 
     return () => window.clearTimeout(timerId);
-  }, []);
+  }, [fetchData]);
+
+  useEffect(() => {
+    socket.on('taskUpdated', fetchData);
+    return () => socket.off('taskUpdated', fetchData);
+  }, [fetchData]);
 
   const handleAssign = async (event) => {
     event.preventDefault();
@@ -84,8 +100,8 @@ const DepartmentAssignments = () => {
       setSelectedIssue(null);
       setAssignment({ worker_id: '', volunteer_id: '', comments: '' });
       await fetchData();
-    } catch {
-      alert('Assignment failed');
+    } catch (error) {
+      alert(getApiErrorMessage(error, 'Assignment failed'));
     }
   };
 
@@ -93,14 +109,14 @@ const DepartmentAssignments = () => {
     try {
       await api.post(`/admin/users/${action}/${id}`);
       await fetchData();
-    } catch {
-      alert('Action failed');
+    } catch (error) {
+      alert(getApiErrorMessage(error, 'Action failed'));
     }
   };
 
   const handleVerification = async (issueId, action) => {
     try {
-      await api.post(`/complaints/verify/${issueId}`, {
+      await api.patch(`/tasks/${issueId}/verify`, {
         action,
         comments: reviewNotes[issueId] || ''
       });
@@ -111,7 +127,7 @@ const DepartmentAssignments = () => {
       }));
       await fetchData();
     } catch (error) {
-      alert(error.response?.data?.message || 'Verification action failed');
+      alert(getApiErrorMessage(error, 'Verification action failed'));
     }
   };
 
@@ -220,7 +236,7 @@ const DepartmentAssignments = () => {
                           <p>{issue.workDescription || issue.work_proof?.description || 'No work description provided.'}</p>
                           <p>{issue.assigned_worker_id?.name || 'Worker not assigned yet'}</p>
                         </div>
-                        <span className={`status-badge ${issue.status}`}>Waiting For Head</span>
+                        <span className={`status-badge ${normalizeStatus(issue.status)}`}>Waiting For Head</span>
                       </div>
 
                       <div className="meta-line">

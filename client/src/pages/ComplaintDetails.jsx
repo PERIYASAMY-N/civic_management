@@ -13,6 +13,7 @@ const getIssueAddress = (issue) => (
 );
 
 const getStatusLabel = (status) => {
+  const normalizedStatus = String(status || 'pending').toLowerCase();
   const labels = {
     assigned_to_dept: 'Assigned To Department',
     assigned_to_worker: 'Assigned To Worker',
@@ -21,11 +22,14 @@ const getStatusLabel = (status) => {
     waiting_for_verification: 'Waiting For Verification',
     verified: 'Verified',
     rework_required: 'Rework Required',
-    completed: 'Closed'
+    completed: 'Completed',
+    closed: 'Closed'
   };
 
-  return labels[status] || String(status || 'pending').replace(/_/g, ' ');
+  return labels[normalizedStatus] || normalizedStatus.replace(/_/g, ' ');
 };
+
+const getStatusClassName = (status) => String(status || 'pending').toLowerCase();
 
 const getProofImage = (issue, stage) => (
   stage === 'before'
@@ -60,7 +64,7 @@ const ComplaintDetails = () => {
       <div className="detail-header glass">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
-            <span className={`status-badge ${issue.status}`}>{getStatusLabel(issue.status)}</span>
+            <span className={`status-badge ${getStatusClassName(issue.status)}`}>{getStatusLabel(issue.status)}</span>
             <h2 style={{ fontSize: '2.5rem', margin: '1rem 0' }}>{issue.title}</h2>
             <div className="meta-row">
               <span className="meta-item"><MapPin size={18} /> {getIssueAddress(issue)}</span>

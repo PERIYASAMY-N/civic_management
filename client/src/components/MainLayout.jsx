@@ -15,7 +15,11 @@ const MainLayout = ({ user, setUser, children }) => {
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
-    setMenuOpen(false);
+    const closeMenu = window.setTimeout(() => {
+      setMenuOpen(false);
+    }, 0);
+
+    return () => window.clearTimeout(closeMenu);
   }, [location.pathname]);
 
   const toggleDarkMode = () => {

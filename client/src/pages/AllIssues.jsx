@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import api, { resolveApiAssetUrl } from '../api';
 import { Link } from 'react-router-dom';
 import { Search, ChevronRight, X, Building2, MapPin, Image as ImageIcon } from 'lucide-react';
@@ -6,6 +6,7 @@ import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { hasRole } from '../utils/userAccess';
+import socket from '../realtime/socket';
 
 const getIssueAddress = (issue) => (
   issue?.address
@@ -26,10 +27,14 @@ const getIssueCoordinates = (issue) => {
   return [lat, lng];
 };
 
+const normalizeIssueStatus = (status) => String(status || 'pending').toLowerCase();
+
 const getMarkerStatusTone = (status) => {
-  if (status === 'completed') return 'completed';
-  if (['verified', 'waiting_for_head', 'waiting_for_verification'].includes(status)) return 'review';
-  if (['in_progress', 'assigned_to_dept', 'assigned_to_worker', 'rework_required'].includes(status)) return 'in-progress';
+  const normalizedStatus = normalizeIssueStatus(status);
+
+  if (normalizedStatus === 'completed') return 'completed';
+  if (normalizedStatus === 'closed') return 'closed';
+  if (['in_progress', 'waiting_for_head', 'waiting_for_verification', 'verified', 'rework_required'].includes(normalizedStatus)) return 'in-progress';
   return 'pending';
 };
 
@@ -55,6 +60,7 @@ const getMarkerIcon = (status) => {
 };
 
 const getStatusLabel = (status) => {
+  const normalizedStatus = normalizeIssueStatus(status);
   const labels = {
     assigned_to_dept: 'Assigned To Department',
     assigned_to_worker: 'Assigned To Worker',
@@ -63,11 +69,14 @@ const getStatusLabel = (status) => {
     waiting_for_verification: 'Waiting For Verification',
     verified: 'Verified',
     rework_required: 'Rework Required',
-    completed: 'Closed'
+    completed: 'Completed',
+    closed: 'Closed'
   };
 
-  return labels[status] || String(status || 'pending').replace(/_/g, ' ');
+  return labels[normalizedStatus] || normalizedStatus.replace(/_/g, ' ');
 };
+
+const getStatusClassName = (status) => normalizeIssueStatus(status);
 
 const getImageSrc = (issue) => (issue?.image ? resolveApiAssetUrl(issue.image) : '');
 
@@ -80,14 +89,7 @@ const AllIssues = ({ user }) => {
   const [assigning, setAssigning] = useState(false);
   const [previewImage, setPreviewImage] = useState(null);
 
-  useEffect(() => {
-    void fetchIssues();
-    if (hasRole(user?.role, 'admin')) {
-      void fetchDepartments();
-    }
-  }, [user]);
-
-  const fetchIssues = async () => {
+  const fetchIssues = useCallback(async () => {
     try {
       const res = await api.get('/complaints');
       setIssues(res.data);
@@ -96,16 +98,28 @@ const AllIssues = ({ user }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const fetchDepartments = async () => {
+  const fetchDepartments = useCallback(async () => {
     try {
       const res = await api.get('/admin/departments');
       setDepartments(res.data);
     } catch {
       console.error('Error fetching departments');
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    void fetchIssues();
+    if (hasRole(user?.role, 'admin')) {
+      void fetchDepartments();
+    }
+  }, [fetchDepartments, fetchIssues, user]);
+
+  useEffect(() => {
+    socket.on('taskUpdated', fetchIssues);
+    return () => socket.off('taskUpdated', fetchIssues);
+  }, [fetchIssues]);
 
   const handleAssign = async (issueId, deptId) => {
     if (!deptId) return alert('Please select a department');
@@ -155,7 +169,7 @@ const AllIssues = ({ user }) => {
                   style={{ cursor: isAdmin ? 'pointer' : 'default' }}
                 >
                   {!isAdmin ? <Link to={`/issues/${issue._id}`} className="issue-link-overlay" /> : null}
-                  <div className="status-indicator" data-status={issue.status}></div>
+                  <div className="status-indicator" data-status={getStatusClassName(issue.status)}></div>
 
                   <div className="issue-thumbnail-wrap">
                     {imageSrc ? (
@@ -190,7 +204,7 @@ const AllIssues = ({ user }) => {
                   </div>
 
                   <div className="issue-status">
-                    <span className={`status-badge ${issue.status}`}>{getStatusLabel(issue.status)}</span>
+                    <span className={`status-badge ${getStatusClassName(issue.status)}`}>{getStatusLabel(issue.status)}</span>
                     <ChevronRight size={18} />
                   </div>
                 </div>
@@ -223,7 +237,7 @@ const AllIssues = ({ user }) => {
                         </div>
                       )}
                       <h4>{issue.title}</h4>
-                      <span className={`status-badge ${issue.status}`}>{getStatusLabel(issue.status)}</span>
+                      <span className={`status-badge ${getStatusClassName(issue.status)}`}>{getStatusLabel(issue.status)}</span>
                       <p className="map-popup-address">{getIssueAddress(issue)}</p>
                       {isAdmin ? (
                         <button className="btn btn-primary map-popup-action" onClick={() => setSelectedIssue(issue)}>
@@ -244,8 +258,8 @@ const AllIssues = ({ user }) => {
             <strong>Legend</strong>
             <span><i className="legend-dot pending"></i> Pending</span>
             <span><i className="legend-dot in-progress"></i> In Progress</span>
-            <span><i className="legend-dot review"></i> Under Review</span>
             <span><i className="legend-dot completed"></i> Completed</span>
+            <span><i className="legend-dot closed"></i> Closed</span>
           </div>
         </div>
       )}
@@ -286,7 +300,7 @@ const AllIssues = ({ user }) => {
               </div>
               <div style={{ flex: 1 }}>
                 <label>Current Status</label>
-                <span className={`status-badge ${selectedIssue.status}`}>{getStatusLabel(selectedIssue.status)}</span>
+                <span className={`status-badge ${getStatusClassName(selectedIssue.status)}`}>{getStatusLabel(selectedIssue.status)}</span>
               </div>
             </div>
             <div className="detail-section">
@@ -410,15 +424,16 @@ const AllIssues = ({ user }) => {
         }
 
         .status-indicator { position: absolute; left: 0; top: 0; bottom: 0; width: 6px; }
-        .status-indicator[data-status="pending"] { background: #dc2626; }
+        .status-indicator[data-status="pending"] { background: #facc15; }
         .status-indicator[data-status="assigned_to_dept"] { background: #facc15; }
         .status-indicator[data-status="assigned_to_worker"] { background: #facc15; }
-        .status-indicator[data-status="in_progress"] { background: #facc15; }
+        .status-indicator[data-status="in_progress"] { background: #0ea5e9; }
         .status-indicator[data-status="waiting_for_head"] { background: #0ea5e9; }
         .status-indicator[data-status="waiting_for_verification"] { background: #0ea5e9; }
-        .status-indicator[data-status="verified"] { background: #10b981; }
-        .status-indicator[data-status="rework_required"] { background: #fb7185; }
+        .status-indicator[data-status="verified"] { background: #0ea5e9; }
+        .status-indicator[data-status="rework_required"] { background: #0ea5e9; }
         .status-indicator[data-status="completed"] { background: #16a34a; }
+        .status-indicator[data-status="closed"] { background: #64748b; }
 
         .issue-main { min-width: 0; }
         .issue-top { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.35rem; flex-wrap: wrap; }
@@ -438,15 +453,16 @@ const AllIssues = ({ user }) => {
 
         .issue-status { display: flex; align-items: center; gap: 1rem; color: var(--text-muted); }
         .status-badge { padding: 0.4rem 1rem; border-radius: 99px; font-size: 0.8rem; font-weight: 600; text-transform: capitalize; }
-        .status-badge.pending { background: rgba(220, 38, 38, 0.1); color: #dc2626; }
+        .status-badge.pending { background: rgba(250, 204, 21, 0.18); color: #a16207; }
         .status-badge.assigned_to_dept { background: rgba(250, 204, 21, 0.18); color: #a16207; }
         .status-badge.assigned_to_worker { background: rgba(250, 204, 21, 0.18); color: #a16207; }
-        .status-badge.in_progress { background: rgba(250, 204, 21, 0.18); color: #a16207; }
+        .status-badge.in_progress { background: rgba(14, 165, 233, 0.14); color: #0369a1; }
         .status-badge.waiting_for_head { background: rgba(14, 165, 233, 0.14); color: #0369a1; }
         .status-badge.waiting_for_verification { background: rgba(14, 165, 233, 0.14); color: #0369a1; }
-        .status-badge.verified { background: rgba(16, 185, 129, 0.14); color: #047857; }
-        .status-badge.rework_required { background: rgba(244, 63, 94, 0.12); color: #be123c; }
+        .status-badge.verified { background: rgba(14, 165, 233, 0.14); color: #0369a1; }
+        .status-badge.rework_required { background: rgba(14, 165, 233, 0.14); color: #0369a1; }
         .status-badge.completed { background: rgba(22, 163, 74, 0.1); color: #16a34a; }
+        .status-badge.closed { background: rgba(100, 116, 139, 0.14); color: #475569; }
 
         .map-wrapper {
           height: 600px;
@@ -487,22 +503,22 @@ const AllIssues = ({ user }) => {
 
         .legend-dot.pending,
         .issue-marker-dot.pending {
-          background: #dc2626;
+          background: #facc15;
         }
 
         .legend-dot.in-progress,
         .issue-marker-dot.in-progress {
-          background: #facc15;
-        }
-
-        .legend-dot.review,
-        .issue-marker-dot.review {
           background: #0ea5e9;
         }
 
         .legend-dot.completed,
         .issue-marker-dot.completed {
           background: #16a34a;
+        }
+
+        .legend-dot.closed,
+        .issue-marker-dot.closed {
+          background: #64748b;
         }
 
         .issue-marker-shell {

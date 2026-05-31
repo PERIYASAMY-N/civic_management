@@ -1,6 +1,7 @@
-import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import api from '../api';
 import { X, Bell } from 'lucide-react';
+import socket from '../realtime/socket';
 
 const NotificationContext = createContext();
 
@@ -8,28 +9,44 @@ export const NotificationProvider = ({ children }) => {
   const [toastNotifications, setToastNotifications] = useState([]);
   const [persistentNotifications, setPersistentNotifications] = useState([]);
   const previousIdsRef = useRef(new Set());
+  const readIdsRef = useRef(new Set());
   const hasFetchedOnceRef = useRef(false);
+  const tokenRef = useRef(localStorage.getItem('token') || '');
 
-  const addToast = (message, type = 'info') => {
+  const addToast = useCallback((message, type = 'info') => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     setToastNotifications((prev) => [...prev, { id, message, type }]);
     setTimeout(() => {
       setToastNotifications((prev) => prev.filter((notification) => notification.id !== id));
     }, 5000);
-  };
+  }, []);
 
-  const refreshNotifications = async () => {
+  const refreshNotifications = useCallback(async () => {
     const token = localStorage.getItem('token');
     if (!token) {
       setPersistentNotifications([]);
       previousIdsRef.current = new Set();
+      readIdsRef.current = new Set();
       hasFetchedOnceRef.current = false;
+      if (tokenRef.current) {
+        tokenRef.current = '';
+        socket.reconnect();
+      }
       return;
+    }
+
+    if (tokenRef.current !== token) {
+      tokenRef.current = token;
+      previousIdsRef.current = new Set();
+      readIdsRef.current = new Set();
+      hasFetchedOnceRef.current = false;
+      socket.reconnect();
     }
 
     try {
       const res = await api.get('/notifications');
-      const notifications = Array.isArray(res.data) ? res.data : [];
+      const notifications = (Array.isArray(res.data) ? res.data : [])
+        .filter((notification) => !notification.read && !readIdsRef.current.has(notification._id));
       const incomingIds = new Set(notifications.map((notification) => notification._id));
 
       if (hasFetchedOnceRef.current) {
@@ -47,20 +64,51 @@ export const NotificationProvider = ({ children }) => {
     } catch (error) {
       console.error('Failed to fetch notifications', error);
     }
-  };
+  }, [addToast]);
 
   useEffect(() => {
-    void refreshNotifications();
+    const initialRefresh = window.setTimeout(() => {
+      void refreshNotifications();
+    }, 0);
     const interval = setInterval(() => {
       void refreshNotifications();
     }, 10000);
 
-    return () => clearInterval(interval);
-  }, []);
+    return () => {
+      window.clearTimeout(initialRefresh);
+      clearInterval(interval);
+    };
+  }, [refreshNotifications]);
+
+  useEffect(() => {
+    const handleSocketNotification = (incoming) => {
+      if (!incoming?._id || incoming.read || readIdsRef.current.has(incoming._id)) {
+        return;
+      }
+
+      setPersistentNotifications((notifications) => {
+        const exists = notifications.some(
+          (notification) => notification._id === incoming._id
+        );
+
+        if (exists) {
+          return notifications;
+        }
+
+        previousIdsRef.current.add(incoming._id);
+        addToast(incoming.message, String(incoming.type || 'info').toLowerCase());
+        return [incoming, ...notifications];
+      });
+    };
+
+    socket.on('notificationCreated', handleSocketNotification);
+    return () => socket.off('notificationCreated', handleSocketNotification);
+  }, [addToast]);
 
   const markAsRead = async (id) => {
     try {
-      await api.put(`/notifications/${id}/read`);
+      await api.patch(`/notifications/${id}/read`);
+      readIdsRef.current.add(id);
       setPersistentNotifications((prev) => prev.filter((notification) => notification._id !== id));
       previousIdsRef.current.delete(id);
     } catch (error) {
@@ -73,7 +121,7 @@ export const NotificationProvider = ({ children }) => {
       value={{
         addToast,
         persistentNotifications,
-        unreadCount: persistentNotifications.length,
+        unreadCount: persistentNotifications.filter((notification) => !notification.read).length,
         markAsRead,
         refreshNotifications
       }}

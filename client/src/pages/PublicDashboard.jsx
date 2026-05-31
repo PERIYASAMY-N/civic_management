@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Activity,
   Award,
@@ -24,6 +24,7 @@ import {
 } from 'recharts';
 import api from '../api';
 import { useNotification } from '../context/NotificationContext';
+import socket from '../realtime/socket';
 
 const PERFORMANCE_COLORS = {
   high: '#16a34a',
@@ -61,33 +62,37 @@ const PublicDashboard = () => {
   const { persistentNotifications, markAsRead, unreadCount } = useNotification();
   const hasAuthenticatedUser = Boolean(localStorage.getItem('token'));
 
-  useEffect(() => {
-    const fetchDashboard = async () => {
-      try {
-        setLoading(true);
-        setError('');
+  const refetchDashboard = useCallback(async () => {
+    try {
+      setError('');
 
-        const [overviewRes, departmentsRes, usersRes, workersRes] = await Promise.all([
-          api.get('/public/overview'),
-          api.get('/public/department-performance'),
-          api.get('/public/top-users'),
-          api.get('/public/top-workers')
-        ]);
+      const [overviewRes, departmentsRes, usersRes, workersRes] = await Promise.all([
+        api.get('/public/overview'),
+        api.get('/public/department-performance'),
+        api.get('/public/top-users'),
+        api.get('/public/top-workers')
+      ]);
 
-        setOverview(overviewRes.data);
-        setDepartments(departmentsRes.data);
-        setTopUsers(usersRes.data);
-        setTopWorkers(workersRes.data);
-      } catch (err) {
-        console.error('Failed to load public dashboard', err);
-        setError('Unable to load public dashboard insights right now.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchDashboard();
+      setOverview(overviewRes.data);
+      setDepartments(departmentsRes.data);
+      setTopUsers(usersRes.data);
+      setTopWorkers(workersRes.data);
+    } catch (err) {
+      console.error('Failed to load public dashboard', err);
+      setError('Unable to load public dashboard insights right now.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void refetchDashboard();
+  }, [refetchDashboard]);
+
+  useEffect(() => {
+    socket.on('taskUpdated', refetchDashboard);
+    return () => socket.off('taskUpdated', refetchDashboard);
+  }, [refetchDashboard]);
 
   const topDepartment = departments[0] || null;
   const leadWorker = topWorkers[0] || null;

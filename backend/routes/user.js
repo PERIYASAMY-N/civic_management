@@ -10,7 +10,18 @@ const router = express.Router();
 
 const PHONE_REGEX = /^\+?[1-9]\d{9,14}$/;
 const PASSWORD_STRENGTH_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
-const VERIFIED_OR_COMPLETED_STATUSES = ['verified', 'completed'];
+const COMPLETED_STATUSES = ['completed', 'closed'];
+const VERIFIED_OR_COMPLETED_STATUSES = ['verified', ...COMPLETED_STATUSES];
+
+const normalizedStatusExpression = (fieldPath) => ({
+  $toLower: { $ifNull: [fieldPath, ''] }
+});
+
+const statusInQuery = (statuses) => ({
+  $expr: {
+    $in: [normalizedStatusExpression('$status'), statuses]
+  }
+});
 
 const profileUpload = multer({
   storage: multer.diskStorage({
@@ -40,7 +51,7 @@ const buildActivitySummary = async (user) => {
   if (hasRole(user.role, 'public')) {
     const [totalIssuesReported, resolvedIssues] = await Promise.all([
       Complaint.countDocuments({ created_by: user._id }),
-      Complaint.countDocuments({ created_by: user._id, status: 'completed' })
+      Complaint.countDocuments({ created_by: user._id, ...statusInQuery(COMPLETED_STATUSES) })
     ]);
 
     return [
@@ -51,7 +62,7 @@ const buildActivitySummary = async (user) => {
 
   if (hasRole(user.role, 'worker')) {
     const [tasksCompleted, assignedTasks] = await Promise.all([
-      Complaint.countDocuments({ assigned_worker_id: user._id, status: { $in: VERIFIED_OR_COMPLETED_STATUSES } }),
+      Complaint.countDocuments({ assigned_worker_id: user._id, ...statusInQuery(VERIFIED_OR_COMPLETED_STATUSES) }),
       Complaint.countDocuments({ assigned_worker_id: user._id })
     ]);
 
@@ -63,7 +74,7 @@ const buildActivitySummary = async (user) => {
 
   if (hasRole(user.role, 'volunteer')) {
     const [tasksCompleted, assignedTasks] = await Promise.all([
-      Complaint.countDocuments({ assigned_volunteer_id: user._id, status: { $in: VERIFIED_OR_COMPLETED_STATUSES } }),
+      Complaint.countDocuments({ assigned_volunteer_id: user._id, ...statusInQuery(VERIFIED_OR_COMPLETED_STATUSES) }),
       Complaint.countDocuments({ assigned_volunteer_id: user._id })
     ]);
 
@@ -88,7 +99,7 @@ const buildActivitySummary = async (user) => {
       }),
       Complaint.countDocuments({
         department_id: user.department_id,
-        status: { $in: VERIFIED_OR_COMPLETED_STATUSES }
+        ...statusInQuery(VERIFIED_OR_COMPLETED_STATUSES)
       })
     ]);
 

@@ -5,8 +5,10 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const authRoutes = require('./routes/auth');
+const { io } = require('./utils/realtime');
 
 const app = express();
+app.set('io', io);
 
 // Ensure upload directories exist
 ['id-proofs', 'issues', 'proofs', 'profile', 'tasks'].forEach((directory) => {
@@ -40,10 +42,12 @@ app.use('/api/user', require('./routes/user'));
 app.use('/api/departments', require('./routes/departments'));
 app.use('/api/images', require('./routes/images'));
 app.use('/api/complaints', require('./routes/complaints'));
+app.use('/api/issues', require('./routes/complaints'));
 app.use('/api/tasks', require('./routes/complaints'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/public', require('./routes/public'));
+app.get('/api/events', (req, res) => io.handleConnection(req, res));
 
 // 404 Handler
 app.use((req, res) => {

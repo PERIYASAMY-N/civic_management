@@ -119,7 +119,7 @@ const getTaskStage = (task) => {
     return 'WAITING_FOR_APPROVAL';
   }
 
-  if (status === 'completed') {
+  if (['completed', 'closed'].includes(status)) {
     return 'COMPLETED';
   }
 
