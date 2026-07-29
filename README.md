@@ -2,7 +2,7 @@
 
 ## 📌 Project Overview
 
-CICIS (Civic Issues Management System) is a full-stack platform designed to bridge the communication gap between citizens and local government authorities.
+Civic Issues Management System is a full-stack platform designed to bridge the communication gap between citizens and local government authorities.
 
 The system enables citizens to report civic problems such as road damage, garbage overflow, water leakage, drainage issues, and other public infrastructure problems. Government departments can efficiently manage, assign, track, verify, and resolve these complaints through a structured workflow.
 
