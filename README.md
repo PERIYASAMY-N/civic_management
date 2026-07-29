@@ -1,4 +1,4 @@
-# 🏙️ CICIS - Civic Issues Management System
+# 🏙️  Civic Issues Management System
 
 ## 📌 Project Overview
 
