@@ -7,8 +7,7 @@ const { auth, authorize } = require('../middleware/auth');
 const { getRoleValues, getStatusValues, hasRole } = require('../utils/userAccess');
 
 const COMPLETED_STATUSES = ['completed'];
-const CLOSED_STATUSES = ['closed'];
-const RESOLVED_STATUSES = ['completed', 'closed'];
+const RESOLVED_STATUSES = ['completed'];
 const ASSIGNED_STATUSES = ['assigned_to_dept', 'assigned_to_worker'];
 const IN_PROGRESS_STATUSES = ['in_progress', 'waiting_for_head', 'waiting_for_verification', 'verified', 'rework_required'];
 const PENDING_STATUSES = ['pending', ...ASSIGNED_STATUSES];
@@ -550,7 +549,6 @@ router.get('/department-analytics', auth, authorize('head', 'admin'), async (req
           pending: { $sum: { $cond: [statusInExpression('$status', PENDING_STATUSES), 1, 0] } },
           inProgress: { $sum: { $cond: [statusInExpression('$status', IN_PROGRESS_STATUSES), 1, 0] } },
           completed: { $sum: { $cond: [statusInExpression('$status', COMPLETED_STATUSES), 1, 0] } },
-          closed: { $sum: { $cond: [statusInExpression('$status', CLOSED_STATUSES), 1, 0] } },
           resolved: { $sum: { $cond: [statusInExpression('$status', RESOLVED_STATUSES), 1, 0] } },
           issuesAssignedThisMonth: { 
             $sum: { $cond: [ { $gte: ['$createdAt', startOfMonth] }, 1, 0 ] } 
@@ -573,7 +571,7 @@ router.get('/department-analytics', auth, authorize('head', 'admin'), async (req
 
     const statsResult = await Complaint.aggregate(pipeline);
     const stats = statsResult[0] || {
-      totalIssues: 0, pending: 0, inProgress: 0, completed: 0, closed: 0, resolved: 0,
+      totalIssues: 0, pending: 0, inProgress: 0, completed: 0, resolved: 0,
       issuesAssignedThisMonth: 0, issuesCompletedThisMonth: 0
     };
 
@@ -659,7 +657,6 @@ router.get('/department-analytics', auth, authorize('head', 'admin'), async (req
       pending: stats.pending,
       inProgress: stats.inProgress,
       completed: stats.completed,
-      closed: stats.closed,
       completionRate,
       averageResolutionHours,
       issuesAssignedThisMonth: stats.issuesAssignedThisMonth,
@@ -687,14 +684,13 @@ router.get('/global-analytics', auth, authorize('admin'), async (req, res) => {
           pending: { $sum: { $cond: [statusInExpression('$status', PENDING_STATUSES), 1, 0] } },
           inProgress: { $sum: { $cond: [statusInExpression('$status', IN_PROGRESS_STATUSES), 1, 0] } },
           completed: { $sum: { $cond: [statusInExpression('$status', COMPLETED_STATUSES), 1, 0] } },
-          closed: { $sum: { $cond: [statusInExpression('$status', CLOSED_STATUSES), 1, 0] } },
           resolved: { $sum: { $cond: [statusInExpression('$status', RESOLVED_STATUSES), 1, 0] } }
         }
       }
     ];
 
     const statsResult = await Complaint.aggregate(pipeline);
-    const stats = statsResult[0] || { totalIssues: 0, pending: 0, inProgress: 0, completed: 0, closed: 0, resolved: 0 };
+    const stats = statsResult[0] || { totalIssues: 0, pending: 0, inProgress: 0, completed: 0, resolved: 0 };
     const completionRate = roundPercentage(stats.resolved, stats.totalIssues);
     
     // Department Ranking & comparison
@@ -724,11 +720,6 @@ router.get('/global-analytics', auth, authorize('admin'), async (req, res) => {
           completed: {
             $size: {
               $filter: { input: "$issues", as: "i", cond: statusInExpression("$$i.status", COMPLETED_STATUSES) }
-            }
-          },
-          closed: {
-            $size: {
-              $filter: { input: "$issues", as: "i", cond: statusInExpression("$$i.status", CLOSED_STATUSES) }
             }
           },
           resolved: {
@@ -768,7 +759,6 @@ router.get('/global-analytics', auth, authorize('admin'), async (req, res) => {
         pending: stats.pending,
         inProgress: stats.inProgress,
         completed: stats.completed,
-        closed: stats.closed,
         completionRate
       },
       departmentRankings,

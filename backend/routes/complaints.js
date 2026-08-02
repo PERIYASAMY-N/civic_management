@@ -23,7 +23,7 @@ const WORKER_WAITING_FOR_HEAD_STATUS = 'waiting_for_head';
 const LEGACY_WORKER_REVIEW_STATUS = 'waiting_for_verification';
 const WORKER_REVIEW_STATUSES = [WORKER_WAITING_FOR_HEAD_STATUS, LEGACY_WORKER_REVIEW_STATUS];
 const ADMIN_CLOSABLE_STATUS = 'verified';
-const ADMIN_CLOSED_STATUS = 'CLOSED';
+const ADMIN_CLOSED_STATUS = 'completed';
 const LOCATION_MAX_ACCURACY_METERS = 200;
 const TASK_POPULATION = [
   ['created_by', 'name'],

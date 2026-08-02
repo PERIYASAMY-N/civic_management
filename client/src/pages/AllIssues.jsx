@@ -33,7 +33,6 @@ const getMarkerStatusTone = (status) => {
   const normalizedStatus = normalizeIssueStatus(status);
 
   if (normalizedStatus === 'completed') return 'completed';
-  if (normalizedStatus === 'closed') return 'closed';
   if (['in_progress', 'waiting_for_head', 'waiting_for_verification', 'verified', 'rework_required'].includes(normalizedStatus)) return 'in-progress';
   return 'pending';
 };
@@ -69,8 +68,7 @@ const getStatusLabel = (status) => {
     waiting_for_verification: 'Waiting For Verification',
     verified: 'Verified',
     rework_required: 'Rework Required',
-    completed: 'Completed',
-    closed: 'Closed'
+    completed: 'Completed'
   };
 
   return labels[normalizedStatus] || normalizedStatus.replace(/_/g, ' ');
@@ -259,7 +257,6 @@ const AllIssues = ({ user }) => {
             <span><i className="legend-dot pending"></i> Pending</span>
             <span><i className="legend-dot in-progress"></i> In Progress</span>
             <span><i className="legend-dot completed"></i> Completed</span>
-            <span><i className="legend-dot closed"></i> Closed</span>
           </div>
         </div>
       )}
@@ -433,7 +430,6 @@ const AllIssues = ({ user }) => {
         .status-indicator[data-status="verified"] { background: #0ea5e9; }
         .status-indicator[data-status="rework_required"] { background: #0ea5e9; }
         .status-indicator[data-status="completed"] { background: #16a34a; }
-        .status-indicator[data-status="closed"] { background: #64748b; }
 
         .issue-main { min-width: 0; }
         .issue-top { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.35rem; flex-wrap: wrap; }
@@ -462,7 +458,6 @@ const AllIssues = ({ user }) => {
         .status-badge.verified { background: rgba(14, 165, 233, 0.14); color: #0369a1; }
         .status-badge.rework_required { background: rgba(14, 165, 233, 0.14); color: #0369a1; }
         .status-badge.completed { background: rgba(22, 163, 74, 0.1); color: #16a34a; }
-        .status-badge.closed { background: rgba(100, 116, 139, 0.14); color: #475569; }
 
         .map-wrapper {
           height: 600px;
@@ -514,11 +509,6 @@ const AllIssues = ({ user }) => {
         .legend-dot.completed,
         .issue-marker-dot.completed {
           background: #16a34a;
-        }
-
-        .legend-dot.closed,
-        .issue-marker-dot.closed {
-          background: #64748b;
         }
 
         .issue-marker-shell {

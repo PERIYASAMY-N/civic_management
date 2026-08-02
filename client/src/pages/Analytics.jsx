@@ -12,7 +12,6 @@ const COLORS = {
   pending: '#f97316',   // Orange
   in_progress: '#a855f7', // Purple
   completed: '#10b981',   // Green
-  closed: '#64748b',      // Gray
   total: '#3b82f6',       // Blue
   accent: '#4f46e5'       // Indigo
 };
@@ -48,8 +47,7 @@ const DepartmentDashboard = ({ data }) => {
   const pieData = [
     { name: 'Pending', value: data.pending, color: COLORS.pending },
     { name: 'In Progress', value: data.inProgress, color: COLORS.in_progress },
-    { name: 'Completed', value: data.completed, color: COLORS.completed },
-    { name: 'Closed', value: data.closed, color: COLORS.closed }
+    { name: 'Completed', value: data.completed, color: COLORS.completed }
   ].filter(d => d.value > 0);
 
   return (
@@ -59,7 +57,6 @@ const DepartmentDashboard = ({ data }) => {
         <StatCard icon={AlertTriangle} label="Pending" value={data.pending} color={COLORS.pending} />
         <StatCard icon={Timer} label="In Progress" value={data.inProgress} color={COLORS.in_progress} />
         <StatCard icon={CheckCircle} label="Completed" value={data.completed} color={COLORS.completed} />
-        <StatCard icon={CheckCircle} label="Closed" value={data.closed} color={COLORS.closed} />
         
         <StatCard icon={Trophy} label="Completion Rate" value={`${data.completionRate}%`} color={COLORS.accent} />
         <StatCard icon={Timer} label="Avg Resolution Time" value={formatResolutionTime(data.averageResolutionHours)} color={COLORS.accent} />
@@ -154,8 +151,7 @@ const AdminDashboard = ({ data }) => {
   const pieData = [
     { name: 'Pending', value: globalStats.pending, color: COLORS.pending },
     { name: 'In Progress', value: globalStats.inProgress, color: COLORS.in_progress },
-    { name: 'Completed', value: globalStats.completed, color: COLORS.completed },
-    { name: 'Closed', value: globalStats.closed, color: COLORS.closed }
+    { name: 'Completed', value: globalStats.completed, color: COLORS.completed }
   ].filter(d => d.value > 0);
 
   return (
@@ -165,7 +161,6 @@ const AdminDashboard = ({ data }) => {
         <StatCard icon={AlertTriangle} label="Total Pending" value={globalStats.pending} color={COLORS.pending} />
         <StatCard icon={Timer} label="Total In Progress" value={globalStats.inProgress} color={COLORS.in_progress} />
         <StatCard icon={CheckCircle} label="Total Completed" value={globalStats.completed} color={COLORS.completed} />
-        <StatCard icon={CheckCircle} label="Total Closed" value={globalStats.closed} color={COLORS.closed} />
         <StatCard icon={Trophy} label="Overall Completion %" value={`${globalStats.completionRate}%`} color={COLORS.accent} />
       </div>
 
@@ -252,7 +247,6 @@ const AdminDashboard = ({ data }) => {
                 <th>Pending</th>
                 <th>In Progress</th>
                 <th>Completed</th>
-                <th>Closed</th>
                 <th>Completion %</th>
               </tr>
             </thead>
@@ -264,7 +258,6 @@ const AdminDashboard = ({ data }) => {
                   <td><span style={{ color: COLORS.pending, fontWeight: 'bold' }}>{dept.pending}</span></td>
                   <td><span style={{ color: COLORS.in_progress, fontWeight: 'bold' }}>{dept.inProgress}</span></td>
                   <td><span style={{ color: COLORS.completed, fontWeight: 'bold' }}>{dept.completed}</span></td>
-                  <td><span style={{ color: COLORS.closed, fontWeight: 'bold' }}>{dept.closed}</span></td>
                   <td><span style={{ color: COLORS.accent, fontWeight: 'bold' }}>{dept.completionRate}%</span></td>
                 </tr>
               ))}

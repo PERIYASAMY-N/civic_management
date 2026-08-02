@@ -6,7 +6,7 @@ import OTPVerification from './pages/OTPVerification';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import MainLayout from './components/MainLayout';
-import Home from './pages/Home';
+import Landing from './pages/Landing';
 import ApprovalPending from './pages/ApprovalPending';
 import PublicDashboard from './pages/PublicDashboard';
 import AllIssues from './pages/AllIssues';
@@ -25,16 +25,16 @@ import { hasRole, isApproved, normalizeRole, normalizeUser } from './utils/userA
 const getDefaultRouteForRole = (role) => {
   switch (normalizeRole(role)) {
     case 'ADMIN':
-      return '/issues';
+      return '/admin/dashboard';
     case 'DEPT_HEAD':
-      return '/assigned-tasks';
+      return '/department/dashboard';
     case 'WORKER':
-      return '/tasks';
+      return '/worker/dashboard';
     case 'VOLUNTEER':
-      return '/volunteer';
+      return '/volunteer/dashboard';
     case 'PUBLIC':
     default:
-      return '/public-dashboard';
+      return '/public/dashboard';
   }
 };
 
@@ -58,9 +58,9 @@ function App() {
     <NotificationProvider>
       <Router>
         <Routes>
-          <Route path="/" element={<Home />} />
+          <Route path="/" element={<Landing />} />
           <Route
-            path="/public-dashboard"
+            path="/public/dashboard"
             element={
               canUseAuthenticatedLayout
                 ? (
@@ -90,10 +90,10 @@ function App() {
             <Route path="/issues/:id" element={<ComplaintDetails />} />
             <Route path="/report" element={<ReportIssue user={user} />} />
             <Route path="/analytics" element={<Analytics />} />
-            <Route path="/tasks" element={<WorkerTasks />} />
-            <Route path="/assigned-tasks" element={<DepartmentAssignments user={user} />} />
-            <Route path="/volunteer" element={<VolunteerDashboard user={user} />} />
-            <Route path="/approvals" element={<AdminOperations />} />
+            <Route path="/worker/dashboard" element={<WorkerTasks />} />
+            <Route path="/department/dashboard" element={<DepartmentAssignments user={user} />} />
+            <Route path="/volunteer/dashboard" element={<VolunteerDashboard user={user} />} />
+            <Route path="/admin/dashboard" element={<AdminOperations />} />
             <Route path="/settings" element={<Settings user={user} setUser={setUser} />} />
             <Route path="/notifications" element={<Notifications />} />
           </Route>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import api from '../api';
 import './Auth.css';
 
@@ -107,9 +108,26 @@ const Register = () => {
   };
 
   return (
-    <div className="auth-container">
-      <div className="auth-card glass">
-        <h2>Join Civic Project</h2>
+    <div className="auth-split-layout">
+      <motion.div 
+        className="auth-image-panel"
+        initial={{ opacity: 0, x: -50 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ duration: 0.8 }}
+      >
+        <div className="auth-image-content">
+          <h1>Civic<span>Hub</span></h1>
+          <p>Join thousands of citizens and officials working together to build better, safer, and smarter communities.</p>
+        </div>
+      </motion.div>
+      <motion.div 
+        className="auth-form-panel"
+        initial={{ opacity: 0, x: 50 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ duration: 0.8 }}
+      >
+        <div className="auth-card glass" style={{ maxWidth: '550px' }}>
+          <h2>Join CivicHub</h2>
         <div className="step-indicator">
           <div className={`step ${step >= 1 ? 'active' : ''}`}>1</div>
           <div className={`step ${step >= 2 ? 'active' : ''}`}>2</div>
@@ -221,7 +239,8 @@ const Register = () => {
         </form>
         {error ? <p className="error">{error}</p> : null}
         <p className="auth-footer">Already have an account? <Link to="/login">Login</Link></p>
-      </div>
+        </div>
+      </motion.div>
     </div>
   );
 };

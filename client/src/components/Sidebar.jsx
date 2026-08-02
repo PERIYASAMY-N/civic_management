@@ -21,14 +21,14 @@ const Sidebar = ({ user, onLogout, isOpen = false, onClose = () => {} }) => {
   const role = user.role;
 
   const menuItems = [
-    { name: 'Public Dashboard', icon: Globe2, path: '/public-dashboard', roles: ['public', 'admin', 'head', 'worker', 'volunteer'] },
+    { name: 'Public Dashboard', icon: Globe2, path: '/public/dashboard', roles: ['public', 'admin', 'head', 'worker', 'volunteer'] },
     { name: 'All Issues', icon: MapPin, path: '/issues', roles: ['public', 'admin', 'head', 'worker', 'volunteer'] },
     { name: 'Report Issue', icon: FileText, path: '/report', roles: ['public'] },
-    { name: 'Assigned Tasks', icon: Users, path: '/assigned-tasks', roles: ['head'] },
-    { name: 'Task Page', icon: CheckCircle2, path: '/tasks', roles: ['worker'] },
-    { name: 'Volunteer Center', icon: Users, path: '/volunteer', roles: ['volunteer'] },
+    { name: 'Assigned Tasks', icon: Users, path: '/department/dashboard', roles: ['head'] },
+    { name: 'Task Page', icon: CheckCircle2, path: '/worker/dashboard', roles: ['worker'] },
+    { name: 'Volunteer Center', icon: Users, path: '/volunteer/dashboard', roles: ['volunteer'] },
     { name: 'Analytics', icon: BarChart3, path: '/analytics', roles: ['admin', 'head'] },
-    { name: 'Approvals', icon: Users, path: '/approvals', roles: ['admin'] },
+    { name: 'Approvals', icon: Users, path: '/admin/dashboard', roles: ['admin'] },
     { name: 'Notifications', icon: Bell, path: '/notifications', roles: ['public', 'admin', 'head', 'worker', 'volunteer'] },
     { name: 'Settings', icon: Settings, path: '/settings', roles: ['public', 'admin', 'head', 'worker', 'volunteer'] }
   ];

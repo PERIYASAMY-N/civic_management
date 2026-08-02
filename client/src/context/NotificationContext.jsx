@@ -30,7 +30,7 @@ export const NotificationProvider = ({ children }) => {
       hasFetchedOnceRef.current = false;
       if (tokenRef.current) {
         tokenRef.current = '';
-        socket.reconnect();
+        socket.disconnect();
       }
       return;
     }
