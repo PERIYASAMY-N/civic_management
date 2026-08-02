@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
 const Department = require('../models/Department');
+const VolunteerCode = require('../models/VolunteerCode');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
@@ -41,6 +42,69 @@ const upload = multer({
   }
 });
 
+// Validate Department Code
+router.post('/departments/validate-code', async (req, res) => {
+  try {
+    const { code } = req.body;
+    if (!code) return res.status(400).json({ message: 'Code is required' });
+
+    const department = await Department.findOne({ department_id: code.trim() });
+    
+    if (!department) {
+      return res.status(404).json({ message: 'Department not found' });
+    }
+    
+    // Check if the department has an active head. (Using active status for department head might be needed, but checking if head_id is set is a good start, or querying User table)
+    const head = await User.findOne({ department_id: department._id, role: { $in: getRoleValues('head') }, status: 'APPROVED' });
+
+    res.json({
+      success: true,
+      department: {
+        id: department._id,
+        name: department.name,
+        code: department.department_id,
+        hasApprovedHead: !!head
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// Validate Volunteer Code
+router.post('/volunteers/validate-code', async (req, res) => {
+  try {
+    const { code } = req.body;
+    if (!code) return res.status(400).json({ message: 'Code is required' });
+
+    const volunteerCode = await VolunteerCode.findOne({ code: code.trim() }).populate('department_id', 'name department_id');
+    
+    if (!volunteerCode) {
+      return res.status(404).json({ message: 'Volunteer Code not found' });
+    }
+    if (!volunteerCode.is_active) {
+      return res.status(400).json({ message: 'Volunteer Code is no longer active' });
+    }
+    if (volunteerCode.is_used) {
+      return res.status(400).json({ message: 'Volunteer Code has already been used' });
+    }
+
+    res.json({
+      success: true,
+      codeData: {
+        code: volunteerCode.code,
+        department: volunteerCode.department_id ? {
+          id: volunteerCode.department_id._id,
+          name: volunteerCode.department_id.name,
+          code: volunteerCode.department_id.department_id
+        } : null
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
 // Multi-step Registration: Step 1 & 2 (Initial Signup)
 router.post('/register', upload.single('government_id_proof'), async (req, res) => {
   try {
@@ -70,16 +134,47 @@ router.post('/register', upload.single('government_id_proof'), async (req, res) 
       otpExpiry
     };
 
-    // Filter optional fields to avoid CastError from empty strings
-    if (department_id && department_id.trim()) {
-      // Find department by its human-readable ID (e.g., WATE-0411)
+    const isHead = hasRole(normalizedRole, 'head');
+    const isWorker = hasRole(normalizedRole, 'worker');
+    const isVolunteer = hasRole(normalizedRole, 'volunteer');
+
+    // Handle Department Code
+    if ((isHead || isWorker) && department_id && department_id.trim()) {
       const dept = await Department.findOne({ department_id: department_id.trim() });
       if (!dept) {
         return res.status(400).json({ 
           message: `Department Code "${department_id}" not found. Please verify with your admin.` 
         });
       }
-      userData.department_id = dept._id; // Use the actual ObjectId
+
+      const activeHead = await User.findOne({ department_id: dept._id, role: { $in: getRoleValues('head') }, status: 'APPROVED' });
+      
+      if (isHead && activeHead) {
+        return res.status(400).json({ message: `Department ${dept.name} already has an active Department Head.` });
+      }
+      
+      if (isWorker && !activeHead) {
+        return res.status(400).json({ message: `Department ${dept.name} does not have an approved Department Head yet.` });
+      }
+
+      userData.department_id = dept._id;
+    }
+
+    // Handle Volunteer Code
+    if (isVolunteer) {
+      const volunteer_code = req.body.volunteer_code;
+      if (!volunteer_code) {
+        return res.status(400).json({ message: 'Volunteer Code is required' });
+      }
+      const vCode = await VolunteerCode.findOne({ code: volunteer_code.trim(), is_active: true, is_used: false });
+      if (!vCode) {
+        return res.status(400).json({ message: 'Invalid, inactive, or already used Volunteer Code' });
+      }
+      if (vCode.department_id) {
+        userData.department_id = vCode.department_id;
+      }
+      // Attach the code to the user object temporarily to mark it used after successful save
+      userData._volunteerCodeDoc = vCode;
     }
     
     if (employee_id && employee_id.trim()) userData.employee_id = employee_id;
@@ -92,6 +187,12 @@ router.post('/register', upload.single('government_id_proof'), async (req, res) 
 
     user = new User(userData);
     await user.save();
+
+    if (userData._volunteerCodeDoc) {
+      userData._volunteerCodeDoc.is_used = true;
+      userData._volunteerCodeDoc.used_by = user._id;
+      await userData._volunteerCodeDoc.save();
+    }
     await sendOTP('email', email, otp);
 
     res.status(201).json({ 
