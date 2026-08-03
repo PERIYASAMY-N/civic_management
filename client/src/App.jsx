@@ -6,7 +6,6 @@ import OTPVerification from './pages/OTPVerification';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import MainLayout from './components/MainLayout';
-import Landing from './pages/Landing';
 import ApprovalPending from './pages/ApprovalPending';
 import PublicDashboard from './pages/PublicDashboard';
 import AllIssues from './pages/AllIssues';
@@ -58,7 +57,8 @@ function App() {
     <NotificationProvider>
       <Router>
         <Routes>
-          <Route path="/" element={<Landing />} />
+          <Route path="/" element={<Login setUser={setUser} />} />
+          <Route path="/public-dashboard" element={<Navigate to="/public/dashboard" replace />} />
           <Route
             path="/public/dashboard"
             element={
@@ -84,7 +84,7 @@ function App() {
               canUseAuthenticatedLayout
                 ? <MainLayout user={user} setUser={setUser} />
                 : <Navigate to="/approval-pending" />
-            ) : <Navigate to="/login" />
+            ) : <Navigate to="/login" state={{ message: 'Please login to report an issue.' }} />
           }>
             <Route path="/issues" element={<AllIssues user={user} />} />
             <Route path="/issues/:id" element={<ComplaintDetails />} />

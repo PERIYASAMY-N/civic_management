@@ -22,7 +22,7 @@ import {
   XAxis,
   YAxis
 } from 'recharts';
-import api from '../api';
+import api, { publicApi } from '../api';
 import { useNotification } from '../context/NotificationContext';
 import socket from '../realtime/socket';
 
@@ -66,20 +66,23 @@ const PublicDashboard = () => {
     try {
       setError('');
 
-      const [overviewRes, departmentsRes, usersRes, workersRes] = await Promise.all([
-        api.get('/public/overview'),
-        api.get('/public/department-performance'),
-        api.get('/public/top-users'),
-        api.get('/public/top-workers')
+      const [dashboardRes, analyticsRes] = await Promise.all([
+        publicApi.get('/public/dashboard'),
+        publicApi.get('/public/analytics')
       ]);
 
-      setOverview(overviewRes.data);
-      setDepartments(departmentsRes.data);
-      setTopUsers(usersRes.data);
-      setTopWorkers(workersRes.data);
+      if (dashboardRes.data.success) {
+        setOverview(dashboardRes.data.data);
+      }
+      if (analyticsRes.data.success) {
+        setDepartments(analyticsRes.data.data.departmentPerformance || []);
+        setTopWorkers(analyticsRes.data.data.topWorkers || []);
+        setTopUsers(analyticsRes.data.data.topUsers || []);
+      }
     } catch (err) {
       console.error('Failed to load public dashboard', err);
-      setError('Unable to load public dashboard insights right now.');
+      // Fail silently for guests, or show the empty state message.
+      setError(''); 
     } finally {
       setLoading(false);
     }
@@ -90,9 +93,11 @@ const PublicDashboard = () => {
   }, [refetchDashboard]);
 
   useEffect(() => {
-    socket.on('taskUpdated', refetchDashboard);
-    return () => socket.off('taskUpdated', refetchDashboard);
-  }, [refetchDashboard]);
+    if (hasAuthenticatedUser) {
+      socket.on('taskUpdated', refetchDashboard);
+      return () => socket.off('taskUpdated', refetchDashboard);
+    }
+  }, [refetchDashboard, hasAuthenticatedUser]);
 
   const topDepartment = departments[0] || null;
   const leadWorker = topWorkers[0] || null;
@@ -144,9 +149,17 @@ const PublicDashboard = () => {
           <ShieldCheck size={20} />
           <span>{error}</span>
         </div>
-      ) : (
-        <>
-          <section className="overview-grid">
+      ) : overview?.totalIssues === 0 ? (
+        <div className="public-error-card" style={{ background: '#f0fdf4', borderColor: '#bbf7d0', color: '#166534', marginBottom: '1.5rem' }}>
+          <ShieldCheck size={20} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            <strong style={{ fontSize: '1.1rem' }}>No civic records available yet.</strong>
+            <span>Be the first citizen to report an issue.</span>
+          </div>
+        </div>
+      ) : null}
+
+      <section className="overview-grid">
             <MetricCard
               icon={Activity}
               label="Total Issues Reported"
@@ -453,8 +466,6 @@ const PublicDashboard = () => {
               )}
             </div>
           </section>
-        </>
-      )}
       <DashboardStyles />
     </div>
   );

@@ -7,6 +7,10 @@ const api = axios.create({
   baseURL: API_BASE_URL,
 });
 
+export const publicApi = axios.create({
+  baseURL: API_BASE_URL,
+});
+
 // Add interceptor for tokens
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
