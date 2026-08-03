@@ -6,6 +6,7 @@ import './Dashboard.css';
 import { getRoleLabel } from '../utils/userAccess';
 import { resolveApiAssetUrl } from '../api';
 import { useNotification } from '../context/NotificationContext';
+import socket from '../realtime/socket';
 
 const MainLayout = ({ user, setUser, children }) => {
   const navigate = useNavigate();
@@ -29,9 +30,11 @@ const MainLayout = ({ user, setUser, children }) => {
 
   const handleLogout = () => {
     localStorage.removeItem('token');
+    localStorage.removeItem('refreshToken');
     localStorage.removeItem('user');
     setUser(null);
-    navigate('/login');
+    if (socket) socket.disconnect();
+    navigate('/');
   };
 
   const profileImageSrc = user?.profile_image ? resolveApiAssetUrl(user.profile_image) : '';

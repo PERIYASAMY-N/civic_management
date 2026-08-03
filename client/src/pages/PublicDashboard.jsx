@@ -59,8 +59,7 @@ const PublicDashboard = () => {
   const [topWorkers, setTopWorkers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const { persistentNotifications, markAsRead, unreadCount } = useNotification();
-  const hasAuthenticatedUser = Boolean(localStorage.getItem('token'));
+  const { markAsRead, unreadCount } = useNotification();
 
   const refetchDashboard = useCallback(async () => {
     try {
@@ -93,11 +92,9 @@ const PublicDashboard = () => {
   }, [refetchDashboard]);
 
   useEffect(() => {
-    if (hasAuthenticatedUser) {
-      socket.on('taskUpdated', refetchDashboard);
-      return () => socket.off('taskUpdated', refetchDashboard);
-    }
-  }, [refetchDashboard, hasAuthenticatedUser]);
+    // We intentionally do not connect to authenticated sockets here.
+    // The public dashboard is strictly read-only and standalone.
+  }, [refetchDashboard]);
 
   const topDepartment = departments[0] || null;
   const leadWorker = topWorkers[0] || null;
@@ -179,55 +176,6 @@ const PublicDashboard = () => {
               accent={getPerformanceColor(overview?.performance ?? 0)}
             />
           </section>
-
-          {hasAuthenticatedUser ? (
-            <section className="public-section">
-              <div className="panel-card notification-panel">
-                <div className="section-heading">
-                  <div>
-                    <span className="section-kicker">Notifications</span>
-                    <h2>Public User Updates</h2>
-                  </div>
-                  <span className="spotlight-chip">
-                    <BellRing size={14} />
-                    {unreadCount} unread
-                  </span>
-                </div>
-
-                {persistentNotifications.length ? (
-                  <div className="notification-feed">
-                    {persistentNotifications.slice(0, 5).map((notification) => (
-                      <div key={notification._id} className="public-notification-row">
-                        <div
-                          className="public-notification-icon"
-                          style={{
-                            background: `${getNotificationAccent(notification.type)}16`,
-                            color: getNotificationAccent(notification.type)
-                          }}
-                        >
-                          <BellRing size={18} />
-                        </div>
-                        <div className="public-notification-copy">
-                          <strong>{getNotificationTitle(notification)}</strong>
-                          <p>{notification.message}</p>
-                          <span>{new Date(notification.createdAt).toLocaleString()}</span>
-                        </div>
-                        <button className="btn btn-primary" onClick={() => markAsRead(notification._id)}>
-                          Mark Read
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <EmptyState
-                    icon={BellRing}
-                    title="No new user notifications"
-                    description="Updates such as worker assigned, in progress, and issue resolved will appear here."
-                  />
-                )}
-              </div>
-            </section>
-          ) : null}
 
           <section className="public-section two-column">
             <div className="panel-card">

@@ -6,6 +6,7 @@ import OTPVerification from './pages/OTPVerification';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import MainLayout from './components/MainLayout';
+import PublicLayout from './components/PublicLayout';
 import ApprovalPending from './pages/ApprovalPending';
 import PublicDashboard from './pages/PublicDashboard';
 import AllIssues from './pages/AllIssues';
@@ -57,37 +58,43 @@ function App() {
     <NotificationProvider>
       <Router>
         <Routes>
-          <Route path="/" element={<Login setUser={setUser} />} />
-          <Route path="/public-dashboard" element={<Navigate to="/public/dashboard" replace />} />
-          <Route
-            path="/public/dashboard"
-            element={
-              canUseAuthenticatedLayout
-                ? (
-                  <MainLayout user={user} setUser={setUser}>
-                    <PublicDashboard />
-                  </MainLayout>
-                )
-                : <PublicDashboard />
-            }
-          />
-          <Route path="/login" element={<Login setUser={setUser} />} />
-          <Route path="/register" element={<Register />} />
-          <Route path="/verify-otp" element={<OTPVerification />} />
-          <Route path="/forgot-password" element={<ForgotPassword />} />
-          <Route path="/reset-password" element={<ResetPassword />} />
-          <Route path="/approval-pending" element={
-            user ? <ApprovalPending user={user} setUser={setUser} /> : <Navigate to="/login" />
-          } />
+          {/* 
+            ==================================================
+            PUBLIC ROUTING TREE
+            ==================================================
+            These routes NEVER check user or role. 
+            They always render strictly inside PublicLayout.
+          */}
+          <Route element={<PublicLayout />}>
+            <Route path="/" element={<Login setUser={setUser} />} />
+            <Route path="/login" element={<Login setUser={setUser} />} />
+            <Route path="/register" element={<Register />} />
+            <Route path="/verify-otp" element={<OTPVerification />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/public-dashboard" element={<Navigate to="/public/dashboard" replace />} />
+            <Route path="/public/dashboard" element={<PublicDashboard />} />
+          </Route>
+
+          {/* 
+            ==================================================
+            PROTECTED ROUTING TREE
+            ==================================================
+            These routes ALWAYS require authentication.
+            If logged in and approved, they render inside MainLayout (ProtectedLayout).
+          */}
           <Route element={
             user ? (
               canUseAuthenticatedLayout
                 ? <MainLayout user={user} setUser={setUser} />
                 : <Navigate to="/approval-pending" />
-            ) : <Navigate to="/login" state={{ message: 'Please login to report an issue.' }} />
+            ) : (
+              <Navigate to="/login" state={{ message: 'Please login to access protected pages.' }} />
+            )
           }>
             <Route path="/issues" element={<AllIssues user={user} />} />
             <Route path="/issues/:id" element={<ComplaintDetails />} />
+            <Route path="/report-issue" element={<Navigate to="/report" replace />} />
             <Route path="/report" element={<ReportIssue user={user} />} />
             <Route path="/analytics" element={<Analytics />} />
             <Route path="/worker/dashboard" element={<WorkerTasks />} />
@@ -97,6 +104,13 @@ function App() {
             <Route path="/settings" element={<Settings user={user} setUser={setUser} />} />
             <Route path="/notifications" element={<Notifications />} />
           </Route>
+
+          {/* Special case: Approval Pending page (no sidebar) */}
+          <Route path="/approval-pending" element={
+            user ? <ApprovalPending user={user} setUser={setUser} /> : <Navigate to="/login" />
+          } />
+
+          {/* Catch-all fallback */}
           <Route path="*" element={<Navigate to={user ? getDefaultRouteForRole(user.role) : '/'} />} />
         </Routes>
       </Router>
