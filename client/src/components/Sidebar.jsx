@@ -9,7 +9,12 @@ import {
   MapPin,
   Settings,
   Users,
-  X
+  X,
+  LayoutDashboard,
+  ClipboardList,
+  Download,
+  User,
+  Search
 } from 'lucide-react';
 
 import { useNotification } from '../context/NotificationContext';
@@ -21,17 +26,39 @@ const Sidebar = ({ user, onLogout, isOpen = false, onClose = () => {} }) => {
   const role = user.role;
 
   const menuItems = [
-    { name: 'Public Dashboard', icon: Globe2, path: '/public/dashboard', roles: ['public', 'admin', 'head', 'worker', 'volunteer'] },
-    { name: 'All Issues', icon: MapPin, path: '/issues', roles: ['public', 'admin', 'head', 'worker', 'volunteer'] },
-    { name: 'Report Issue', icon: FileText, path: '/report', roles: ['public'] },
+    { name: 'Dashboard', icon: LayoutDashboard, path: '/public/user/dashboard', roles: ['public'] },
+    { name: 'Report Issue', icon: FileText, path: '/public/user/report', roles: ['public'] },
+    { name: 'My Complaints', icon: ClipboardList, path: '/public/user/complaints', roles: ['public'] },
+    { name: 'Track Complaint', icon: MapPin, path: '/public/user/track', roles: ['public'] },
+    
+    { name: 'All Issues', icon: MapPin, path: '/issues', roles: ['admin', 'head', 'worker', 'volunteer'] },
     { name: 'Assigned Tasks', icon: Users, path: '/department/dashboard', roles: ['head'] },
     { name: 'Task Page', icon: CheckCircle2, path: '/worker/dashboard', roles: ['worker'] },
     { name: 'Volunteer Center', icon: Users, path: '/volunteer/dashboard', roles: ['volunteer'] },
+    
     { name: 'Analytics', icon: BarChart3, path: '/analytics', roles: ['admin', 'head'] },
+    { name: 'My Analytics', icon: BarChart3, path: '/public/user/analytics', roles: ['public'] },
+    
     { name: 'Approvals', icon: Users, path: '/admin/dashboard', roles: ['admin'] },
+    
     { name: 'Notifications', icon: Bell, path: '/notifications', roles: ['public', 'admin', 'head', 'worker', 'volunteer'] },
-    { name: 'Settings', icon: Settings, path: '/settings', roles: ['public', 'admin', 'head', 'worker', 'volunteer'] }
+    
+    { name: 'Downloads', icon: Download, path: '/public/user/downloads', roles: ['public'] },
+    
+    { name: 'Public Dashboard', icon: Globe2, path: '/public-dashboard', roles: ['public', 'admin', 'head', 'worker', 'volunteer'] },
+    
+    { name: 'Profile', icon: User, path: '/settings#profile', roles: ['public'] },
+    { name: 'Settings', icon: Settings, path: '/settings#security', roles: ['public'] },
+    { name: 'Settings', icon: Settings, path: '/settings', roles: ['admin', 'head', 'worker', 'volunteer'] }
   ];
+
+  const isActive = (itemPath) => {
+    if (itemPath.includes('#')) {
+      const currentHash = location.hash || '#profile';
+      return location.pathname + currentHash === itemPath;
+    }
+    return location.pathname === itemPath;
+  };
 
   return (
     <aside className={`sidebar glass ${isOpen ? 'open' : ''}`}>
@@ -43,11 +70,11 @@ const Sidebar = ({ user, onLogout, isOpen = false, onClose = () => {} }) => {
       </div>
 
       <nav className="sidebar-nav">
-        {menuItems.filter((item) => hasRole(role, item.roles)).map((item) => (
+        {menuItems.filter((item) => hasRole(role, item.roles)).map((item, idx) => (
           <Link
-            key={item.path}
+            key={item.path + idx}
             to={item.path}
-            className={`nav-item ${location.pathname === item.path ? 'active' : ''}`}
+            className={`nav-item ${isActive(item.path) ? 'active' : ''}`}
             onClick={onClose}
           >
             <item.icon size={20} />

@@ -45,6 +45,7 @@ const getPostLoginRoute = (role) => {
     case 'VOLUNTEER':
       return '/volunteer/dashboard';
     case 'PUBLIC':
+      return '/public/user/dashboard';
     default:
       return '/public/dashboard';
   }

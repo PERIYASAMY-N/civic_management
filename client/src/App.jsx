@@ -14,6 +14,11 @@ import ReportIssue from './pages/ReportIssue';
 import Analytics from './pages/Analytics';
 import WorkerTasks from './pages/WorkerTasks';
 import DepartmentAssignments from './pages/DepartmentAssignments';
+import PublicUserDashboard from './pages/PublicUserDashboard';
+import MyComplaints from './pages/MyComplaints';
+import TrackComplaint from './pages/TrackComplaint';
+import MyAnalytics from './pages/MyAnalytics';
+import Downloads from './pages/Downloads';
 import VolunteerDashboard from './pages/VolunteerDashboard';
 import AdminOperations from './pages/AdminOperations';
 import Settings from './pages/Settings';
@@ -33,6 +38,7 @@ const getDefaultRouteForRole = (role) => {
     case 'VOLUNTEER':
       return '/volunteer/dashboard';
     case 'PUBLIC':
+      return '/public/user/dashboard';
     default:
       return '/public/dashboard';
   }
@@ -94,8 +100,19 @@ function App() {
           }>
             <Route path="/issues" element={<AllIssues user={user} />} />
             <Route path="/issues/:id" element={<ComplaintDetails />} />
-            <Route path="/report-issue" element={<Navigate to="/report" replace />} />
-            <Route path="/report" element={<ReportIssue user={user} />} />
+            
+            {/* Public User Citizen Portal Routes */}
+            <Route path="/public/user/dashboard" element={<PublicUserDashboard user={user} />} />
+            <Route path="/public/user/report" element={<ReportIssue user={user} />} />
+            <Route path="/public/user/complaints" element={<MyComplaints user={user} />} />
+            <Route path="/public/user/complaints/:id" element={<ComplaintDetails />} />
+            <Route path="/public/user/track" element={<TrackComplaint user={user} />} />
+            <Route path="/public/user/analytics" element={<MyAnalytics user={user} />} />
+            <Route path="/public/user/downloads" element={<Downloads user={user} />} />
+            
+            <Route path="/report-issue" element={<Navigate to="/public/user/report" replace />} />
+            <Route path="/report" element={<Navigate to="/public/user/report" replace />} />
+            
             <Route path="/analytics" element={<Analytics />} />
             <Route path="/worker/dashboard" element={<WorkerTasks />} />
             <Route path="/department/dashboard" element={<DepartmentAssignments user={user} />} />

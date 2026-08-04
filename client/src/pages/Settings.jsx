@@ -222,111 +222,139 @@ const Settings = ({ user, setUser }) => {
         </aside>
 
         <form className="profile-form-stack" onSubmit={handleSubmit}>
-          <section className="glass settings-section-card">
-            <div className="section-title">
-              <div className="section-icon"><User size={18} /></div>
-              <div>
-                <h3>Personal Info</h3>
-                <p>Keep your public account identity and contact details current.</p>
-              </div>
-            </div>
+          <div style={{ display: 'flex', gap: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem', marginBottom: '1.5rem' }}>
+            {['profile', 'security', 'preferences'].map(tab => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => { window.location.hash = tab; }}
+                style={{
+                  padding: '0.5rem 1rem',
+                  background: (window.location.hash.replace('#', '') || 'profile') === tab ? 'var(--primary)' : 'transparent',
+                  color: (window.location.hash.replace('#', '') || 'profile') === tab ? 'white' : 'var(--text-main)',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: (window.location.hash.replace('#', '') || 'profile') === tab ? 'bold' : 'normal',
+                  textTransform: 'capitalize'
+                }}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
 
-            <div className="profile-grid">
-              <div className="input-group">
-                <label>Name</label>
-                <input name="name" value={formData.name} onChange={handleChange} required />
-              </div>
-              <div className="input-group">
-                <label>Email</label>
-                <div className="input-with-icon">
-                  <Mail size={16} />
-                  <input type="email" name="email" value={formData.email} onChange={handleChange} required />
+          <div style={{ display: (window.location.hash.replace('#', '') || 'profile') === 'profile' ? 'block' : 'none' }}>
+            <section className="glass settings-section-card">
+              <div className="section-title">
+                <div className="section-icon"><User size={18} /></div>
+                <div>
+                  <h3>Personal Info</h3>
+                  <p>Keep your public account identity and contact details current.</p>
                 </div>
               </div>
-              <div className="input-group">
-                <label>Phone Number</label>
-                <div className="input-with-icon">
-                  <Phone size={16} />
-                  <input name="phone" value={formData.phone} onChange={handleChange} placeholder="+91xxxxxxxxxx" />
+
+              <div className="profile-grid">
+                <div className="input-group">
+                  <label>Name</label>
+                  <input name="name" value={formData.name} onChange={handleChange} required />
+                </div>
+                <div className="input-group">
+                  <label>Email (Non-editable)</label>
+                  <div className="input-with-icon">
+                    <Mail size={16} />
+                    <input type="email" name="email" value={formData.email} disabled style={{opacity: 0.7}} />
+                  </div>
+                </div>
+                <div className="input-group">
+                  <label>Phone Number</label>
+                  <div className="input-with-icon">
+                    <Phone size={16} />
+                    <input name="phone" value={formData.phone} onChange={handleChange} placeholder="+91xxxxxxxxxx" />
+                  </div>
+                </div>
+                <div className="input-group">
+                  <label>Department / Role</label>
+                  <input value={profile?.role === 'public' ? 'Public Citizen' : departmentLabel} readOnly disabled style={{opacity: 0.7}} />
                 </div>
               </div>
-              <div className="input-group">
-                <label>Department</label>
-                <input value={departmentLabel} readOnly disabled />
-              </div>
-            </div>
 
-            <div className="profile-image-uploader">
-              <div>
-                <label>Profile Image</label>
-                <p>Upload a JPG or PNG image and preview it before saving.</p>
+              <div className="profile-image-uploader">
+                <div>
+                  <label>Profile Image</label>
+                  <p>Upload a JPG or PNG image and preview it before saving.</p>
+                </div>
+                <label className="upload-button">
+                  <ImagePlus size={18} />
+                  Choose Image
+                  <input type="file" accept=".jpg,.jpeg,.png,image/png,image/jpeg" onChange={handleImageSelection} hidden />
+                </label>
               </div>
-              <label className="upload-button">
-                <ImagePlus size={18} />
-                Choose Image
-                <input type="file" accept=".jpg,.jpeg,.png,image/png,image/jpeg" onChange={handleImageSelection} hidden />
-              </label>
-            </div>
-          </section>
+            </section>
+          </div>
 
-          <section className="glass settings-section-card">
-            <div className="section-title">
-              <div className="section-icon"><Shield size={18} /></div>
-              <div>
-                <h3>Security</h3>
-                <p>Change your password with confirmation and strength validation.</p>
-              </div>
-            </div>
-
-            <div className="profile-grid">
-              <div className="input-group">
-                <label>Current Password</label>
-                <div className="input-with-icon">
-                  <Lock size={16} />
-                  <input type="password" name="oldPassword" value={formData.oldPassword} onChange={handleChange} />
+          <div style={{ display: window.location.hash.replace('#', '') === 'security' ? 'block' : 'none' }}>
+            <section className="glass settings-section-card">
+              <div className="section-title">
+                <div className="section-icon"><Shield size={18} /></div>
+                <div>
+                  <h3>Security</h3>
+                  <p>Change your password with confirmation and strength validation.</p>
                 </div>
               </div>
-              <div className="input-group">
-                <label>New Password</label>
-                <div className="input-with-icon">
-                  <Lock size={16} />
-                  <input type="password" name="newPassword" value={formData.newPassword} onChange={handleChange} />
+
+              <div className="profile-grid">
+                <div className="input-group">
+                  <label>Current Password</label>
+                  <div className="input-with-icon">
+                    <Lock size={16} />
+                    <input type="password" name="oldPassword" value={formData.oldPassword} onChange={handleChange} />
+                  </div>
+                </div>
+                <div className="input-group">
+                  <label>New Password</label>
+                  <div className="input-with-icon">
+                    <Lock size={16} />
+                    <input type="password" name="newPassword" value={formData.newPassword} onChange={handleChange} />
+                  </div>
+                </div>
+                <div className="input-group">
+                  <label>Confirm Password</label>
+                  <div className="input-with-icon">
+                    <Lock size={16} />
+                    <input type="password" name="confirmPassword" value={formData.confirmPassword} onChange={handleChange} />
+                  </div>
                 </div>
               </div>
-              <div className="input-group">
-                <label>Confirm Password</label>
-                <div className="input-with-icon">
-                  <Lock size={16} />
-                  <input type="password" name="confirmPassword" value={formData.confirmPassword} onChange={handleChange} />
+            </section>
+          </div>
+
+          <div style={{ display: window.location.hash.replace('#', '') === 'preferences' ? 'block' : 'none' }}>
+            <section className="glass settings-section-card">
+              <div className="section-title">
+                <div className="section-icon"><Bell size={18} /></div>
+                <div>
+                  <h3>Preferences</h3>
+                  <p>Choose which civic updates should reach you.</p>
                 </div>
               </div>
-            </div>
-          </section>
 
-          <section className="glass settings-section-card">
-            <div className="section-title">
-              <div className="section-icon"><Bell size={18} /></div>
-              <div>
-                <h3>Preferences</h3>
-                <p>Choose which civic updates should reach you.</p>
+              <div className="preference-list">
+                <label className="preference-row">
+                  <span>Issue Updates</span>
+                  <input type="checkbox" name="issueUpdates" checked={formData.issueUpdates} onChange={handleChange} />
+                </label>
+                <label className="preference-row">
+                  <span>Assignment Alerts</span>
+                  <input type="checkbox" name="assignmentAlerts" checked={formData.assignmentAlerts} onChange={handleChange} />
+                </label>
+                <label className="preference-row">
+                  <span>Completion Alerts</span>
+                  <input type="checkbox" name="completionAlerts" checked={formData.completionAlerts} onChange={handleChange} />
+                </label>
               </div>
-            </div>
-
-            <div className="preference-list">
-              <label className="preference-row">
-                <span>Issue Updates</span>
-                <input type="checkbox" name="issueUpdates" checked={formData.issueUpdates} onChange={handleChange} />
-              </label>
-              <label className="preference-row">
-                <span>Assignment Alerts</span>
-                <input type="checkbox" name="assignmentAlerts" checked={formData.assignmentAlerts} onChange={handleChange} />
-              </label>
-              <label className="preference-row">
-                <span>Completion Alerts</span>
-                <input type="checkbox" name="completionAlerts" checked={formData.completionAlerts} onChange={handleChange} />
-              </label>
-            </div>
-          </section>
+            </section>
+          </div>
 
           <button type="submit" className="btn btn-primary profile-save-button" disabled={saving}>
             {saving ? <Loader className="spin" size={18} /> : <Save size={18} />}

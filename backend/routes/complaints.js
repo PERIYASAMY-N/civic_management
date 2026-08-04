@@ -880,6 +880,85 @@ router.get('/reverse-geocode', auth, async (req, res) => {
   }
 });
 
+// Get My Analytics Stats
+router.get('/my/stats', auth, authorize('public'), async (req, res) => {
+  try {
+    const mongoose = require('mongoose');
+    const createdBy = new mongoose.Types.ObjectId(req.user.id);
+
+    const complaints = await Complaint.find({ created_by: createdBy });
+    
+    let total = 0;
+    let pending = 0;
+    let inProgress = 0;
+    let completed = 0;
+    let totalResolutionTime = 0;
+    let resolvedCount = 0;
+    
+    const categoryCounts = {};
+    const monthlyCounts = {};
+
+    complaints.forEach((c) => {
+      total++;
+      const status = String(c.status || '').toLowerCase();
+      
+      if (status === 'completed') completed++;
+      else if (['pending', 'assigned_to_dept', 'assigned_to_worker'].includes(status)) pending++;
+      else inProgress++;
+
+      const cat = c.category || 'Other';
+      categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+
+      const date = new Date(c.createdAt);
+      const monthYear = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      monthlyCounts[monthYear] = (monthlyCounts[monthYear] || 0) + 1;
+
+      if (status === 'completed' && c.createdAt && c.updatedAt) {
+        const timeDiff = new Date(c.updatedAt).getTime() - new Date(c.createdAt).getTime();
+        if (timeDiff > 0) {
+          totalResolutionTime += timeDiff;
+          resolvedCount++;
+        }
+      }
+    });
+
+    const resolutionRate = total > 0 ? ((completed / total) * 100).toFixed(2) : 0;
+    const averageResolutionTimeHours = resolvedCount > 0 ? (totalResolutionTime / resolvedCount / (1000 * 60 * 60)).toFixed(2) : 0;
+
+    res.json({
+      success: true,
+      data: {
+        total,
+        pending,
+        inProgress,
+        completed,
+        resolutionRate,
+        averageResolutionTimeHours,
+        categoryCounts,
+        monthlyCounts
+      }
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// Get My Complaints
+router.get('/my', auth, authorize('public'), async (req, res) => {
+  try {
+    const complaints = await Complaint.find({ created_by: req.user.id })
+      .populate('created_by', 'name')
+      .populate('department_id', 'name')
+      .populate('assigned_worker_id', 'name')
+      .populate('assigned_volunteer_id', 'name')
+      .sort({ createdAt: -1 });
+    res.json({ success: true, data: complaints });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // Get All Complaints (Public Transparency)
 router.get('/', async (req, res) => {
   try {

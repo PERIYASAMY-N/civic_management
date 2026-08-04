@@ -553,7 +553,7 @@ const ReportIssue = () => {
       });
 
       alert('Issue reported successfully.');
-      navigate('/issues');
+      navigate('/public/user/complaints');
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to report issue');
     } finally {
