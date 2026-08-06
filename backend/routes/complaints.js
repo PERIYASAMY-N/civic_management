@@ -19,13 +19,13 @@ const TASK_UPLOAD_DIRECTORY = path.join(__dirname, '..', 'uploads', 'tasks');
 const SAFE_IMAGE_PATTERN = /^\/uploads\/issues\/[A-Za-z0-9._-]+\.(jpg|jpeg|png)$/i;
 const SAFE_PROOF_IMAGE_PATTERN = /^\/uploads\/proofs\/[A-Za-z0-9._-]+\.(jpg|jpeg|png|webp)$/i;
 const SAFE_TASK_IMAGE_PATTERN = /^\/uploads\/tasks\/[A-Za-z0-9._-]+\.(jpg|jpeg|png|webp)$/i;
-const WORKER_STARTABLE_STATUSES = ['pending', 'assigned_to_dept', 'assigned_to_worker', 'rework_required'];
-const WORKER_WAITING_FOR_HEAD_STATUS = 'waiting_for_head';
-const LEGACY_WORKER_REVIEW_STATUS = 'waiting_for_verification';
+const WORKER_STARTABLE_STATUSES = ['ASSIGNED', 'REWORK_REQUIRED'];
+const WORKER_WAITING_FOR_HEAD_STATUS = 'WAITING_FOR_DEPARTMENT_APPROVAL';
+const LEGACY_WORKER_REVIEW_STATUS = 'WAITING_FOR_ADMIN_APPROVAL';
 const WORKER_REVIEW_STATUSES = [WORKER_WAITING_FOR_HEAD_STATUS, LEGACY_WORKER_REVIEW_STATUS];
-const ADMIN_CLOSABLE_STATUS = 'verified';
-const ADMIN_CLOSED_STATUS = 'completed';
-const LOCATION_MAX_ACCURACY_METERS = 200;
+const ADMIN_CLOSABLE_STATUS = 'WAITING_FOR_ADMIN_APPROVAL';
+const ADMIN_CLOSED_STATUS = 'COMPLETED';
+const LOCATION_MAX_ACCURACY_METERS = 10000; // Relaxed to allow frontend 15s timeout fallbacks
 const TASK_POPULATION = [
   ['created_by', 'name'],
   ['department_id', 'name department_id'],
@@ -528,6 +528,7 @@ const clearAfterWorkFields = (complaint) => {
 const saveBeforeWorkData = (complaint, beforeWork) => {
   complaint.beforeWork = {
     image: beforeWork.image,
+    description: beforeWork.description,
     location: {
       lat: beforeWork.lat,
       lng: beforeWork.lng,
@@ -540,6 +541,7 @@ const saveBeforeWorkData = (complaint, beforeWork) => {
     address: beforeWork.address,
     timestamp: beforeWork.timestamp
   };
+  complaint.workDescription = beforeWork.description;
   complaint.work_proof = complaint.work_proof || {};
   complaint.work_proof.before_image = beforeWork.image;
   complaint.work_proof.after_image = undefined;
@@ -635,6 +637,7 @@ const submitBeforeWork = async (req, res) => {
       ? toUploadedPath(beforeUpload)
       : normalizeBodyString(req.body.beforeImage || req.body.before_image || req.body.image);
     const beforeGeo = await enrichProofGeo(req.body, 'before');
+    const description = normalizeBodyString(req.body.description || req.body.workDescription);
 
     if (!beforeImage || !isSafeProofImage(beforeImage)) {
       return res.status(400).json({ success: false, message: 'A valid before-work image is required' });
@@ -642,6 +645,10 @@ const submitBeforeWork = async (req, res) => {
 
     if (!beforeGeo) {
       return res.status(400).json({ success: false, message: 'Valid before-work location is required' });
+    }
+
+    if (!description) {
+      return res.status(400).json({ success: false, message: 'A before-work description is required' });
     }
 
     if (!normalizeBodyString(beforeGeo.address)) {
@@ -655,15 +662,16 @@ const submitBeforeWork = async (req, res) => {
     const previousStatus = complaint.status;
     saveBeforeWorkData(complaint, {
       image: beforeImage,
+      description,
       lat: beforeGeo.lat,
       lng: beforeGeo.lng,
       accuracy: beforeGeo.accuracy,
       address: beforeGeo.address,
       timestamp: beforeGeo.time
     });
-    complaint.status = 'in_progress';
+    complaint.status = 'IN_PROGRESS';
     complaint.timeline.push({
-      status: 'in_progress',
+      status: 'IN_PROGRESS',
       updated_by: req.user.id,
       comments: previousStatus === 'rework_required'
         ? 'Worker resubmitted before-work proof and restarted the task'
@@ -673,11 +681,12 @@ const submitBeforeWork = async (req, res) => {
     await complaint.save();
     const task = await loadTaskForResponse(complaint._id);
     emitTaskUpdated(task);
+    if (io) io.emit('workStarted', task);
     await notifyCitizen(complaint, 'in_progress');
     await createNotificationsForUsers({
       userIds: await getDepartmentHeadIds(complaint.department_id),
-      title: 'Worker started the task',
-      message: 'Worker started the task',
+      title: 'Before Work Submitted',
+      message: `Worker has submitted before-work details for task ${complaint.title}`,
       type: 'INFO',
       complaintId: complaint._id
     });
@@ -710,8 +719,8 @@ const submitAfterWork = async (req, res) => {
       return res.status(403).json({ message: 'Not assigned to this task' });
     }
 
-    if (complaint.status !== 'in_progress') {
-      return res.status(400).json({ message: 'After-work submission is allowed only for in-progress tasks' });
+    if (complaint.status !== 'IN_PROGRESS') {
+      return res.status(400).json({ message: 'After-work submission is allowed only for in-progress tasks', currentStatus: complaint.status, expectedStatus: 'IN_PROGRESS' });
     }
 
     const beforeWork = getBeforeWorkRecord(complaint);
@@ -782,12 +791,13 @@ const submitAfterWork = async (req, res) => {
     await complaint.save();
     const task = await loadTaskForResponse(complaint._id);
     emitTaskUpdated(task);
+    if (io) io.emit('workCompleted', task);
 
     const departmentHeadIds = await getDepartmentHeadIds(complaint.department_id);
     await createNotificationsForUsers({
       userIds: departmentHeadIds,
-      title: 'Worker completed the task',
-      message: 'Worker completed the task',
+      title: 'After Work Submitted',
+      message: `Worker has completed the task ${complaint.title} and is awaiting approval.`,
       type: 'INFO',
       complaintId: complaint._id
     });
@@ -982,9 +992,9 @@ router.post('/assign-dept/:id', auth, authorize('admin'), async (req, res) => {
     if (!complaint) return res.status(404).json({ message: 'Complaint not found' });
 
     complaint.department_id = department_id;
-    complaint.status = 'assigned_to_dept';
+    complaint.status = 'DEPARTMENT_ASSIGNED';
     complaint.timeline.push({
-      status: 'assigned_to_dept',
+      status: 'DEPARTMENT_ASSIGNED',
       updated_by: req.user.id,
       comments: 'Assigned to department'
     });
@@ -1019,6 +1029,16 @@ router.post('/assign/:id', auth, authorize('head'), async (req, res) => {
       return res.status(400).json({ success: false, message: 'Department not found' });
     }
 
+    // Ensure worker is provided
+    if (!worker_id) {
+      return res.status(400).json({ success: false, message: 'Worker is required for assignment' });
+    }
+
+    // Prevent duplicate assignment
+    if (complaint.assigned_worker_id && complaint.assigned_worker_id.toString() === worker_id) {
+      return res.status(400).json({ success: false, message: 'Task is already assigned to this worker' });
+    }
+
     // If assigning a worker, ensure they are approved and in the department
     if (worker_id) {
       const worker = await User.findById(worker_id);
@@ -1047,9 +1067,14 @@ router.post('/assign/:id', auth, authorize('head'), async (req, res) => {
         return res.status(400).json({ success: false, message: 'Volunteer is not active' });
       }
       complaint.assigned_volunteer_id = volunteer_id;
-      complaint.assignedWorker = volunteer_id;
-      complaint.assignedWorkerName = volunteer.name;
-      complaint.assignedDepartmentName = department.name;
+      // We shouldn't overwrite assignedWorker with volunteer if worker is also assigned, 
+      // but keeping it as is since volunteer is typically assigned alone or we might want both fields.
+      // Actually it's better to NOT overwrite assignedWorker if worker_id exists
+      if (!worker_id) {
+        complaint.assignedWorker = volunteer_id;
+        complaint.assignedWorkerName = volunteer.name;
+        complaint.assignedDepartmentName = department.name;
+      }
     }
     
     complaint.assignedBy = req.user.id;
@@ -1181,7 +1206,7 @@ const reviewByDepartmentHead = async (req, res) => {
     }
 
     const approved = action === 'approve';
-    complaint.status = approved ? ADMIN_CLOSABLE_STATUS : 'rework_required';
+    complaint.status = approved ? ADMIN_CLOSABLE_STATUS : 'REWORK_REQUIRED';
     complaint.verification = {
       status: approved ? 'approved' : 'rejected',
       verified_by: req.user.id,
@@ -1189,7 +1214,7 @@ const reviewByDepartmentHead = async (req, res) => {
       comments
     };
     complaint.timeline.push({
-      status: approved ? ADMIN_CLOSABLE_STATUS : 'rework_required',
+      status: approved ? ADMIN_CLOSABLE_STATUS : 'REWORK_REQUIRED',
       updated_by: req.user.id,
       comments: comments || (
         approved

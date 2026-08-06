@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { MapPin, Search, CheckCircle, Clock, AlertCircle } from 'lucide-react';
-import api from '../api';
+import api, { resolveApiAssetUrl } from '../api';
 
 const TrackComplaint = () => {
   const [searchParams] = useSearchParams();
@@ -38,21 +38,56 @@ const TrackComplaint = () => {
     }
   };
 
-  const timelineSteps = [
-    { key: 'pending', label: 'Complaint Submitted', icon: AlertCircle },
-    { key: 'assigned_to_dept', label: 'Department Assigned', icon: Clock },
-    { key: 'assigned_to_worker', label: 'Worker Assigned', icon: Clock },
-    { key: 'in_progress', label: 'Work Started', icon: Clock },
-    { key: 'waiting_for_head', label: 'After Work Uploaded', icon: Clock },
-    { key: 'verified', label: 'Department Verified', icon: CheckCircle },
-    { key: 'completed', label: 'Completed', icon: CheckCircle }
+  const TIMELINE_STAGES = [
+    {
+      key: 'NEW',
+      label: 'Complaint Submitted',
+      icon: AlertCircle
+    },
+    {
+      key: 'ADMIN_APPROVED',
+      label: 'Admin Approved',
+      icon: Clock
+    },
+    {
+      key: 'DEPARTMENT_ASSIGNED',
+      label: 'Department Assigned',
+      icon: Clock
+    },
+    {
+      key: 'ASSIGNED',
+      label: 'Worker Assigned',
+      icon: Clock
+    },
+    {
+      key: 'IN_PROGRESS',
+      label: 'Work In Progress',
+      icon: Clock
+    },
+    {
+      key: 'WAITING_FOR_DEPARTMENT_APPROVAL',
+      label: 'After Work Uploaded',
+      icon: Clock
+    },
+    {
+      key: 'WAITING_FOR_ADMIN_APPROVAL',
+      label: 'Department Verified',
+      icon: CheckCircle
+    },
+    {
+      key: 'COMPLETED',
+      label: 'Completed (Admin Verified)',
+      icon: CheckCircle
+    }
   ];
+
+  const getNormalizedStatus = (status) => String(status || 'NEW').toUpperCase();
 
   const getTimelineHistory = () => {
     if (!complaint || !complaint.timeline) return [];
     // Map timeline items to steps
     return complaint.timeline.map((event, index) => {
-      const step = timelineSteps.find(s => s.key === event.status) || { label: event.status.replace(/_/g, ' '), icon: Clock };
+      const step = TIMELINE_STAGES.find(s => s.key === event.status) || { label: event.status.replace(/_/g, ' '), icon: Clock };
       return {
         ...event,
         label: step.label,
@@ -97,12 +132,58 @@ const TrackComplaint = () => {
       {complaint && !loading && (
         <div className="glass" style={{ padding: '2rem', borderRadius: 'var(--radius)' }}>
           <div style={{ marginBottom: '2rem', paddingBottom: '1.5rem', borderBottom: '1px solid var(--border)' }}>
-            <h3 style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>{complaint.title}</h3>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-              <strong>ID:</strong> {complaint._id} <br/>
-              <strong>Category:</strong> {complaint.category || 'Other'} <br/>
-              <strong>Department:</strong> {complaint.department_id?.name || 'Unassigned'}
-            </p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <h3 style={{ fontSize: '1.5rem', marginBottom: '0.5rem', marginTop: 0 }}>{complaint.title}</h3>
+              {complaint.priority && (
+                <span style={{
+                  backgroundColor: complaint.priority === 'high' ? '#fee2e2' : complaint.priority === 'medium' ? '#ffedd5' : '#dcfce7',
+                  color: complaint.priority === 'high' ? '#dc2626' : complaint.priority === 'medium' ? '#ea580c' : '#16a34a',
+                  padding: '0.25rem 0.75rem',
+                  borderRadius: '999px',
+                  fontSize: '0.8rem',
+                  fontWeight: 'bold',
+                  textTransform: 'uppercase'
+                }}>
+                  {complaint.priority}
+                </span>
+              )}
+            </div>
+            
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginTop: '1rem', color: 'var(--text-main)', fontSize: '0.95rem' }}>
+              <div><strong>ID:</strong> {complaint._id}</div>
+              <div><strong>Category:</strong> {complaint.category || 'Other'}</div>
+              <div><strong>Department:</strong> {complaint.department_id?.name || 'Unassigned'}</div>
+              <div><strong>Citizen:</strong> {complaint.created_by?.name || 'Unknown'}</div>
+              <div style={{ gridColumn: '1 / -1' }}><strong>Description:</strong> {complaint.description}</div>
+              {complaint.instructions && <div style={{ gridColumn: '1 / -1' }}><strong>Instructions:</strong> {complaint.instructions}</div>}
+              {complaint.location?.address && <div style={{ gridColumn: '1 / -1' }}><strong>Location:</strong> {complaint.location.address}</div>}
+            </div>
+
+            {(complaint.image || complaint.beforeWork?.image || complaint.afterWork?.image) && (
+              <div style={{ marginTop: '1.5rem' }}>
+                <h4 style={{ marginBottom: '0.75rem', fontSize: '1rem', color: 'var(--text-muted)' }}>Issue Images</h4>
+                <div style={{ display: 'flex', gap: '1rem', overflowX: 'auto', paddingBottom: '0.5rem' }}>
+                  {complaint.image && (
+                    <div style={{ minWidth: '150px' }}>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Citizen Upload</span>
+                      <img src={resolveApiAssetUrl(complaint.image)} alt="Citizen upload" style={{ width: '150px', height: '150px', objectFit: 'cover', borderRadius: '8px' }} />
+                    </div>
+                  )}
+                  {complaint.beforeWork?.image && (
+                    <div style={{ minWidth: '150px' }}>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Before Work</span>
+                      <img src={resolveApiAssetUrl(complaint.beforeWork.image)} alt="Before work" style={{ width: '150px', height: '150px', objectFit: 'cover', borderRadius: '8px' }} />
+                    </div>
+                  )}
+                  {complaint.afterWork?.image && (
+                    <div style={{ minWidth: '150px' }}>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>After Work</span>
+                      <img src={resolveApiAssetUrl(complaint.afterWork.image)} alt="After work" style={{ width: '150px', height: '150px', objectFit: 'cover', borderRadius: '8px' }} />
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="tracking-timeline">

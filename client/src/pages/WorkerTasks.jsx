@@ -21,8 +21,9 @@ import {
   getProofLocation,
   reverseGeocodeAddress
 } from '../utils/location';
-import { formatAccuracyMeters } from '../utils/geolocation';
+import { formatAccuracyMeters, watchForAccuratePosition } from '../utils/geolocation';
 import socket from '../realtime/socket';
+import CameraCapture from '../components/CameraCapture';
 
 const GPS_ACCURACY_LIMIT_METERS = 200;
 const SUPPORTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp']);
@@ -61,6 +62,7 @@ const createDraft = () => ({
   beforeLocationLoading: false,
   beforeLocationError: '',
   beforeSubmitting: false,
+  beforeDescription: '',
   afterImageFile: null,
   afterPreview: '',
   afterLocation: null,
@@ -70,7 +72,8 @@ const createDraft = () => ({
   billPreview: '',
   description: '',
   afterSubmitting: false,
-  formError: ''
+  formError: '',
+  activeCamera: null // 'before' | 'after' | 'bill'
 });
 
 const revokePreview = (value) => {
@@ -110,17 +113,17 @@ const validateImageFile = (file) => {
 };
 
 const getTaskStage = (task) => {
-  const status = String(task?.status || '').toLowerCase();
+  const status = String(task?.status || '').toUpperCase();
 
-  if (status === 'in_progress') {
+  if (status === 'IN_PROGRESS') {
     return 'IN_PROGRESS';
   }
 
-  if (['waiting_for_head', 'waiting_for_verification', 'verified'].includes(status)) {
+  if (['WAITING_FOR_DEPARTMENT_APPROVAL', 'WAITING_FOR_ADMIN_APPROVAL'].includes(status)) {
     return 'WAITING_FOR_APPROVAL';
   }
 
-  if (['completed', 'closed'].includes(status)) {
+  if (['COMPLETED', 'CLOSED'].includes(status)) {
     return 'COMPLETED';
   }
 
@@ -128,21 +131,20 @@ const getTaskStage = (task) => {
 };
 
 const hasAccurateLocation = (location) => {
-  const accuracy = Number(location?.accuracy);
   return (
     Number.isFinite(Number(location?.lat))
     && Number.isFinite(Number(location?.lng))
     && String(location?.address || '').trim().length > 0
-    && Number.isFinite(accuracy)
-    && accuracy <= GPS_ACCURACY_LIMIT_METERS
   );
 };
 
 const getAssignedBy = (task) => {
   const timeline = Array.isArray(task?.timeline) ? [...task.timeline] : [];
   const assignment = timeline
-    .reverse()
-    .find((entry) => String(entry?.status || '').toLowerCase() === 'assigned_to_worker');
+    .find((entry) => {
+      const s = String(entry?.status || '').toLowerCase();
+      return s === 'assigned_to_worker' || s === 'assigned';
+    });
 
   return assignment?.updated_by?.name || task?.created_by?.name || 'Department Head';
 };
@@ -176,6 +178,7 @@ const WorkerTasks = () => {
   const locationRequestRef = useRef({});
   const { addToast } = useNotification();
   const addToastRef = useRef(addToast);
+  const [activeTab, setActiveTab] = useState('TODAY');
 
   useEffect(() => {
     draftsRef.current = drafts;
@@ -302,11 +305,13 @@ const WorkerTasks = () => {
     const loadingKey = `${field}LocationLoading`;
     const errorKey = `${field}LocationError`;
     const locationKey = `${field}Location`;
+    const statusKey = `${field}LocationStatus`; // For DETECTING / IMPROVING
 
     updateDraft(taskId, {
       [loadingKey]: true,
       [errorKey]: '',
       [locationKey]: null,
+      [statusKey]: 'DETECTING',
       formError: ''
     });
 
@@ -319,28 +324,23 @@ const WorkerTasks = () => {
     };
 
     try {
-      if (!navigator.geolocation?.getCurrentPosition) {
-        throw new Error('Location is not supported in this browser.');
-      }
-
-      const position = await new Promise((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          timeout: 15000,
-          maximumAge: 0
-        });
+      const position = await watchForAccuratePosition({
+        targetAccuracy: 30, // Target 30m as requested
+        maxWaitTimeMs: 15000,
+        onProgress: (pos, status) => {
+          updateIfCurrent({
+            [statusKey]: status
+          });
+        }
       });
 
       const lat = Number(position.coords.latitude);
       const lng = Number(position.coords.longitude);
       const accuracy = Number(position.coords.accuracy);
+      const speed = position.coords.speed; // m/s
 
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
         throw new Error('Unable to detect GPS coordinates.');
-      }
-
-      if (!Number.isFinite(accuracy) || accuracy > GPS_ACCURACY_LIMIT_METERS) {
-        throw new Error('Move to open area for accurate GPS');
       }
 
       const address = String(await reverseGeocodeAddress(lat, lng) || '').trim();
@@ -355,9 +355,11 @@ const WorkerTasks = () => {
           lat,
           lng,
           accuracy,
+          speed,
           address,
           timestamp: new Date(position.timestamp || Date.now()).toISOString()
-        }
+        },
+        [statusKey]: position.status || 'READY'
       });
     } catch (error) {
       const message = error?.code === 1
@@ -369,7 +371,8 @@ const WorkerTasks = () => {
       updateIfCurrent({
         [loadingKey]: false,
         [errorKey]: message,
-        [locationKey]: null
+        [locationKey]: null,
+        [statusKey]: 'ERROR'
       });
       addToastRef.current?.(message, 'error');
     }
@@ -437,6 +440,13 @@ const WorkerTasks = () => {
       return;
     }
 
+    if (!draft.beforeDescription.trim()) {
+      const message = 'Please provide a before-work description.';
+      updateDraft(task._id, { beforeSubmitting: false, formError: message });
+      addToastRef.current?.(message, 'error');
+      return;
+    }
+
     if (!Number.isFinite(Number(locationData?.lat)) || !Number.isFinite(Number(locationData?.lng))) {
       const message = 'Location missing';
       updateDraft(task._id, { beforeSubmitting: false, formError: message });
@@ -465,6 +475,7 @@ const WorkerTasks = () => {
       formData.append('lng', String(locationData.lng));
       formData.append('accuracy', String(locationData.accuracy ?? ''));
       formData.append('address', locationData.address || '');
+      formData.append('description', draft.beforeDescription.trim());
       formData.append('submittedAt', locationData.timestamp || new Date().toISOString());
       formData.append('beforeLocation', JSON.stringify(locationData));
 
@@ -534,12 +545,12 @@ const WorkerTasks = () => {
     }
   };
 
-  const renderLocationCard = (location, loadingState, errorState, retryAction) => {
+  const renderLocationCard = (location, loadingState, errorState, retryAction, status) => {
     if (loadingState) {
       return (
         <div className="worker-location-card info">
           <Loader size={16} className="spin" />
-          <span>Detecting accurate GPS location...</span>
+          <span>{status === 'IMPROVING' ? 'Improving Accuracy...' : 'Detecting GPS...'}</span>
         </div>
       );
     }
@@ -564,35 +575,75 @@ const WorkerTasks = () => {
     }
 
     return (
-      <div className="worker-location-card success">
+      <div className={`worker-location-card ${location.accuracy > 30 ? 'warning' : 'success'}`}>
         <div className="worker-location-line">
           <MapPin size={16} />
           <p>{formatAddressForDisplay(location.address)}</p>
         </div>
         <div className="worker-location-line small">
           <ShieldCheck size={16} />
-          <span>{`GPS Accuracy: ${formatAccuracyMeters(location.accuracy)}`}</span>
+          <span>
+            {`GPS Accuracy: ${formatAccuracyMeters(location.accuracy)}`}
+            {location.accuracy > 30 && ' (Low Accuracy)'}
+            {status === 'TIMEOUT_FALLBACK' && ' - Best available used'}
+          </span>
         </div>
         <div className="worker-location-line small">
           <Clock3 size={16} />
           <span>{formatDateTime(location.timestamp)}</span>
         </div>
+        {Number.isFinite(location.speed) && location.speed >= 0 && (
+          <div className="worker-location-line small">
+            <span>Speed: {location.speed.toFixed(1)} m/s</span>
+          </div>
+        )}
       </div>
     );
   };
 
-  const renderPreviewCard = (label, previewUrl, fileName, locationContent) => (
-    <div className="worker-preview-card">
-      <span className="worker-section-label">{label}</span>
-      {previewUrl ? (
-        <img src={previewUrl} alt={label} className="worker-proof-image" />
-      ) : (
-        <div className="worker-empty-preview">No image selected yet.</div>
-      )}
-      {fileName ? <p className="worker-file-name">{fileName}</p> : null}
-      {locationContent}
-    </div>
-  );
+  const renderPreviewCard = (label, previewUrl, fileName, locationContent, onDropFile) => {
+    const handleDragOver = (e) => {
+      e.preventDefault();
+      e.currentTarget.style.borderColor = 'var(--primary)';
+      e.currentTarget.style.background = 'rgba(79, 70, 229, 0.05)';
+    };
+    const handleDragLeave = (e) => {
+      e.preventDefault();
+      e.currentTarget.style.borderColor = 'rgba(148, 163, 184, 0.34)';
+      e.currentTarget.style.background = 'rgba(241, 245, 249, 0.9)';
+    };
+    const handleDrop = (e) => {
+      e.preventDefault();
+      e.currentTarget.style.borderColor = 'rgba(148, 163, 184, 0.34)';
+      e.currentTarget.style.background = 'rgba(241, 245, 249, 0.9)';
+      const file = e.dataTransfer.files?.[0];
+      if (file && onDropFile) onDropFile(file);
+    };
+
+    return (
+      <div className="worker-preview-card">
+        <span className="worker-section-label">{label}</span>
+        {previewUrl ? (
+          <img src={previewUrl} alt={label} className="worker-proof-image" />
+        ) : (
+          <div 
+            className="worker-empty-preview"
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            style={{ cursor: 'pointer', transition: 'all 0.2s' }}
+            onClick={() => {
+              // Note: this assumes we can trigger the corresponding file input
+            }}
+          >
+            Drag and drop an image here, or click Upload Photo
+          </div>
+        )}
+        {fileName ? <p className="worker-file-name">{fileName}</p> : null}
+        {locationContent}
+      </div>
+    );
+  };
 
   const renderStoredPreview = (label, imagePath, location) => (
     <div className="worker-preview-card">
@@ -629,7 +680,7 @@ const WorkerTasks = () => {
     <section className="worker-meta-card">
       <div className="worker-meta-top">
         <div>
-          <p className="worker-kicker">Assigned Civic Task</p>
+          <p className="worker-kicker" style={{ fontFamily: 'monospace' }}>ID: {String(task._id).slice(-8).toUpperCase()}</p>
           <h3>{task.title}</h3>
         </div>
         <div className="worker-badges">
@@ -642,22 +693,29 @@ const WorkerTasks = () => {
 
       <div className="worker-meta-grid">
         <div className="worker-meta-item">
+          <span>Category</span>
+          <strong>{task.category || 'Maintenance'}</strong>
+        </div>
+        <div className="worker-meta-item">
           <span>Department</span>
           <strong>{task?.department_id?.name || 'Not assigned'}</strong>
         </div>
         <div className="worker-meta-item">
-          <span>Assigned By</span>
-          <strong>{getAssignedBy(task)}</strong>
+          <span>Assigned Date</span>
+          <strong>{formatDateTime(task?.assignedAt || task?.createdAt)}</strong>
         </div>
         <div className="worker-meta-item">
-          <span>Created Date</span>
-          <strong>{formatDateTime(task?.createdAt)}</strong>
-        </div>
-        <div className="worker-meta-item">
-          <span>Status</span>
-          <strong>{STATUS_COPY[stage].badge}</strong>
+          <span>Expected Completion</span>
+          <strong>{formatDateTime(task?.sla_expiry)}</strong>
         </div>
       </div>
+
+      {task.instructions ? (
+        <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', background: '#fffbeb', borderLeft: '4px solid #f59e0b', borderRadius: '4px' }}>
+          <strong style={{ display: 'block', fontSize: '0.75rem', textTransform: 'uppercase', color: '#b45309', marginBottom: '0.25rem' }}>Instructions from Department Head</strong>
+          <p style={{ margin: 0, fontSize: '0.9rem', color: '#92400e' }}>{task.instructions}</p>
+        </div>
+      ) : null}
 
       <div className="worker-address-card">
         <MapPin size={16} />
@@ -684,7 +742,7 @@ const WorkerTasks = () => {
       </div>
 
       <div className="worker-action-row">
-        <button type="button" className="worker-primary-button" onClick={() => triggerInput(task._id, 'before-camera')}>
+        <button type="button" className="worker-primary-button" onClick={() => updateDraft(task._id, { activeCamera: 'before' })}>
           <Camera size={18} />
           Open Camera
         </button>
@@ -694,7 +752,16 @@ const WorkerTasks = () => {
         </button>
       </div>
 
-      {renderPreviewCard(
+      {draft.activeCamera === 'before' ? (
+        <CameraCapture 
+          onCapture={(file) => {
+            handleBeforeImage(task._id, file);
+            updateDraft(task._id, { activeCamera: null });
+          }}
+          onCancel={() => updateDraft(task._id, { activeCamera: null })}
+          fallbackInputRef={{ current: fileInputRefs.current[`${task._id}:before-camera`] }}
+        />
+      ) : renderPreviewCard(
         'Before Work Preview',
         draft.beforePreview,
         draft.beforeImageFile?.name || '',
@@ -702,17 +769,32 @@ const WorkerTasks = () => {
           draft.beforeLocation,
           draft.beforeLocationLoading,
           draft.beforeLocationError,
-          () => void detectLiveLocation(task._id, 'before')
-        )
+          () => void detectLiveLocation(task._id, 'before'),
+          draft.beforeLocationStatus
+        ),
+        (file) => handleBeforeImage(task._id, file)
       )}
+
+      <div className="worker-description-block" style={{ marginTop: '1rem' }}>
+        <label htmlFor={`before-description-${task._id}`}>Description</label>
+        <textarea
+          id={`before-description-${task._id}`}
+          rows="3"
+          value={draft.beforeDescription || ''}
+          onChange={(event) => updateDraft(task._id, { beforeDescription: event.target.value, formError: '' })}
+          placeholder="Describe the initial state or planned work."
+          style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }}
+        />
+      </div>
 
       {draft.formError ? <p className="worker-form-error">{draft.formError}</p> : null}
 
       <button
         type="button"
         className="worker-submit-button"
-        disabled={!draft.beforeImageFile || !hasAccurateLocation(draft.beforeLocation) || draft.beforeLocationLoading || draft.beforeSubmitting}
+        disabled={!draft.beforeImageFile || !draft.beforeDescription?.trim() || !hasAccurateLocation(draft.beforeLocation) || draft.beforeLocationLoading || draft.beforeSubmitting}
         onClick={() => void submitBeforeWork(task)}
+        style={{ marginTop: '1rem' }}
       >
         {draft.beforeSubmitting ? 'Submitting...' : 'Submit Before Work'}
       </button>
@@ -732,7 +814,7 @@ const WorkerTasks = () => {
       <div className="worker-split-grid">
         <div className="worker-column">
           <div className="worker-action-row compact">
-            <button type="button" className="worker-primary-button" onClick={() => triggerInput(task._id, 'after-camera')}>
+            <button type="button" className="worker-primary-button" onClick={() => updateDraft(task._id, { activeCamera: 'after' })}>
               <Camera size={18} />
               Open Camera
             </button>
@@ -742,7 +824,16 @@ const WorkerTasks = () => {
             </button>
           </div>
 
-          {renderPreviewCard(
+          {draft.activeCamera === 'after' ? (
+            <CameraCapture 
+              onCapture={(file) => {
+                handleAfterImage(task._id, file);
+                updateDraft(task._id, { activeCamera: null });
+              }}
+              onCancel={() => updateDraft(task._id, { activeCamera: null })}
+              fallbackInputRef={{ current: fileInputRefs.current[`${task._id}:after-camera`] }}
+            />
+          ) : renderPreviewCard(
             'After Work Image',
             draft.afterPreview,
             draft.afterImageFile?.name || '',
@@ -750,8 +841,10 @@ const WorkerTasks = () => {
               draft.afterLocation,
               draft.afterLocationLoading,
               draft.afterLocationError,
-              () => void detectLiveLocation(task._id, 'after')
-            )
+              () => void detectLiveLocation(task._id, 'after'),
+              draft.afterLocationStatus
+            ),
+            (file) => handleAfterImage(task._id, file)
           )}
         </div>
 
@@ -769,7 +862,8 @@ const WorkerTasks = () => {
             draft.billImageFile?.name || '',
             <div className="worker-location-card muted">
               <span>Bill proof is required for final verification.</span>
-            </div>
+            </div>,
+            (file) => handleBillImage(task._id, file)
           )}
         </div>
       </div>
@@ -870,6 +964,28 @@ const WorkerTasks = () => {
         </div>
       ) : null}
 
+      <div className="worker-tabs glass" style={{ display: 'flex', gap: '1rem', padding: '1rem', borderRadius: '18px', overflowX: 'auto', marginBottom: '1.5rem' }}>
+        {['TODAY', 'PENDING', 'IN_PROGRESS', 'COMPLETED'].map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            style={{
+              padding: '0.75rem 1.5rem',
+              borderRadius: '999px',
+              border: 'none',
+              fontWeight: '600',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              background: activeTab === tab ? 'var(--primary)' : 'transparent',
+              color: activeTab === tab ? 'white' : 'var(--text-main)',
+              transition: 'all 0.2s'
+            }}
+          >
+            {tab.replace(/_/g, ' ')}
+          </button>
+        ))}
+      </div>
+
       {!loading && tasks.length === 0 ? (
         <div className="worker-empty-card glass">
           <ShieldCheck size={22} />
@@ -880,8 +996,40 @@ const WorkerTasks = () => {
         </div>
       ) : null}
 
+      {!loading && tasks.length > 0 && tasks.filter((task) => {
+        const stage = getTaskStage(task);
+        if (activeTab === 'TODAY') {
+          const assignedDate = new Date(task.assignedAt || task.createdAt);
+          const today = new Date();
+          return assignedDate.toDateString() === today.toDateString();
+        }
+        if (activeTab === 'PENDING') return stage === 'PENDING';
+        if (activeTab === 'IN_PROGRESS') return stage === 'IN_PROGRESS';
+        if (activeTab === 'COMPLETED') return stage === 'COMPLETED' || stage === 'WAITING_FOR_APPROVAL';
+        return true;
+      }).length === 0 ? (
+        <div className="worker-empty-card glass">
+          <ShieldCheck size={22} />
+          <div>
+            <h3>No tasks in this category</h3>
+            <p>Try switching to a different tab to see your tasks.</p>
+          </div>
+        </div>
+      ) : null}
+
       <div className="worker-task-list">
-        {tasks.map((task) => {
+        {tasks.filter((task) => {
+          const stage = getTaskStage(task);
+          if (activeTab === 'TODAY') {
+            const assignedDate = new Date(task.assignedAt || task.createdAt);
+            const today = new Date();
+            return assignedDate.toDateString() === today.toDateString();
+          }
+          if (activeTab === 'PENDING') return stage === 'PENDING';
+          if (activeTab === 'IN_PROGRESS') return stage === 'IN_PROGRESS';
+          if (activeTab === 'COMPLETED') return stage === 'COMPLETED' || stage === 'WAITING_FOR_APPROVAL';
+          return true;
+        }).map((task) => {
           const stage = getTaskStage(task);
           const draft = getDraft(task._id);
 

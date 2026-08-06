@@ -27,13 +27,13 @@ const getIssueCoordinates = (issue) => {
   return [lat, lng];
 };
 
-const normalizeIssueStatus = (status) => String(status || 'pending').toLowerCase();
+const normalizeIssueStatus = (status) => String(status || 'NEW').toUpperCase();
 
 const getMarkerStatusTone = (status) => {
   const normalizedStatus = normalizeIssueStatus(status);
 
-  if (normalizedStatus === 'completed') return 'completed';
-  if (['in_progress', 'waiting_for_head', 'waiting_for_verification', 'verified', 'rework_required'].includes(normalizedStatus)) return 'in-progress';
+  if (['COMPLETED', 'CLOSED'].includes(normalizedStatus)) return 'completed';
+  if (['IN_PROGRESS', 'WAITING_FOR_DEPARTMENT_APPROVAL', 'WAITING_FOR_ADMIN_APPROVAL', 'REWORK_REQUIRED'].includes(normalizedStatus)) return 'in-progress';
   return 'pending';
 };
 
@@ -61,20 +61,22 @@ const getMarkerIcon = (status) => {
 const getStatusLabel = (status) => {
   const normalizedStatus = normalizeIssueStatus(status);
   const labels = {
-    assigned_to_dept: 'Assigned To Department',
-    assigned_to_worker: 'Assigned To Worker',
-    in_progress: 'In Progress',
-    waiting_for_head: 'Waiting For Head',
-    waiting_for_verification: 'Waiting For Verification',
-    verified: 'Verified',
-    rework_required: 'Rework Required',
-    completed: 'Completed'
+    NEW: 'Pending Review',
+    ADMIN_APPROVED: 'Admin Approved',
+    DEPARTMENT_ASSIGNED: 'Assigned To Department',
+    ASSIGNED: 'Assigned To Worker',
+    IN_PROGRESS: 'In Progress',
+    WAITING_FOR_DEPARTMENT_APPROVAL: 'Waiting For Dept Head',
+    WAITING_FOR_ADMIN_APPROVAL: 'Waiting For Admin',
+    REWORK_REQUIRED: 'Rework Required',
+    COMPLETED: 'Completed',
+    CLOSED: 'Closed'
   };
 
   return labels[normalizedStatus] || normalizedStatus.replace(/_/g, ' ');
 };
 
-const getStatusClassName = (status) => normalizeIssueStatus(status);
+const getStatusClassName = (status) => normalizeIssueStatus(status).toLowerCase();
 
 const getImageSrc = (issue) => (issue?.image ? resolveApiAssetUrl(issue.image) : '');
 
@@ -421,15 +423,16 @@ const AllIssues = ({ user }) => {
         }
 
         .status-indicator { position: absolute; left: 0; top: 0; bottom: 0; width: 6px; }
-        .status-indicator[data-status="pending"] { background: #facc15; }
-        .status-indicator[data-status="assigned_to_dept"] { background: #facc15; }
-        .status-indicator[data-status="assigned_to_worker"] { background: #facc15; }
-        .status-indicator[data-status="in_progress"] { background: #0ea5e9; }
-        .status-indicator[data-status="waiting_for_head"] { background: #0ea5e9; }
-        .status-indicator[data-status="waiting_for_verification"] { background: #0ea5e9; }
-        .status-indicator[data-status="verified"] { background: #0ea5e9; }
-        .status-indicator[data-status="rework_required"] { background: #0ea5e9; }
-        .status-indicator[data-status="completed"] { background: #16a34a; }
+        .status-indicator[data-status="new"] { background: #f59e0b; }
+        .status-indicator[data-status="admin_approved"] { background: #f59e0b; }
+        .status-indicator[data-status="department_assigned"] { background: #facc15; }
+        .status-indicator[data-status="assigned"] { background: #facc15; }
+        .status-indicator[data-status="in_progress"] { background: #3b82f6; }
+        .status-indicator[data-status="waiting_for_department_approval"] { background: #3b82f6; }
+        .status-indicator[data-status="waiting_for_admin_approval"] { background: #3b82f6; }
+        .status-indicator[data-status="rework_required"] { background: #3b82f6; }
+        .status-indicator[data-status="completed"] { background: #10b981; }
+        .status-indicator[data-status="closed"] { background: #64748b; }
 
         .issue-main { min-width: 0; }
         .issue-top { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.35rem; flex-wrap: wrap; }
@@ -448,16 +451,12 @@ const AllIssues = ({ user }) => {
         .priority-tag.medium { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
 
         .issue-status { display: flex; align-items: center; gap: 1rem; color: var(--text-muted); }
-        .status-badge { padding: 0.4rem 1rem; border-radius: 99px; font-size: 0.8rem; font-weight: 600; text-transform: capitalize; }
-        .status-badge.pending { background: rgba(250, 204, 21, 0.18); color: #a16207; }
-        .status-badge.assigned_to_dept { background: rgba(250, 204, 21, 0.18); color: #a16207; }
-        .status-badge.assigned_to_worker { background: rgba(250, 204, 21, 0.18); color: #a16207; }
-        .status-badge.in_progress { background: rgba(14, 165, 233, 0.14); color: #0369a1; }
-        .status-badge.waiting_for_head { background: rgba(14, 165, 233, 0.14); color: #0369a1; }
-        .status-badge.waiting_for_verification { background: rgba(14, 165, 233, 0.14); color: #0369a1; }
-        .status-badge.verified { background: rgba(14, 165, 233, 0.14); color: #0369a1; }
-        .status-badge.rework_required { background: rgba(14, 165, 233, 0.14); color: #0369a1; }
-        .status-badge.completed { background: rgba(22, 163, 74, 0.1); color: #16a34a; }
+        .status-badge { padding: 0.25rem 0.75rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; border: 1px solid transparent; }
+        .status-badge.new, .status-badge.admin_approved { background: rgba(245, 158, 11, 0.1); color: #b45309; border-color: rgba(245, 158, 11, 0.2); }
+        .status-badge.department_assigned, .status-badge.assigned { background: rgba(250, 204, 21, 0.18); color: #a16207; border-color: rgba(250, 204, 21, 0.3); }
+        .status-badge.in_progress, .status-badge.waiting_for_department_approval, .status-badge.waiting_for_admin_approval, .status-badge.rework_required { background: rgba(59, 130, 246, 0.1); color: #1d4ed8; border-color: rgba(59, 130, 246, 0.2); }
+        .status-badge.completed { background: rgba(16, 185, 129, 0.1); color: #047857; border-color: rgba(16, 185, 129, 0.2); }
+        .status-badge.closed { background: rgba(100, 116, 139, 0.1); color: #334155; border-color: rgba(100, 116, 139, 0.2); }
 
         .map-wrapper {
           height: 600px;

@@ -29,6 +29,21 @@ export const reverseGeocodeAddress = async (lat, lng) => {
   }
 
   const payload = await response.json();
+  if (payload && payload.address) {
+    const { road, neighbourhood, suburb, village, town, city, county, state, postcode, country } = payload.address;
+    const parts = [
+      road,
+      neighbourhood || suburb || village,
+      town || city,
+      county,
+      state,
+      postcode,
+      country
+    ].filter(Boolean);
+    if (parts.length > 0) {
+      return parts.join(', ');
+    }
+  }
   return typeof payload?.display_name === 'string' ? payload.display_name.trim() : '';
 };
 

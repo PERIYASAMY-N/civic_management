@@ -12,6 +12,7 @@ export const formatAccuracyMeters = (accuracy) => {
 
 export const watchForAccuratePosition = ({
   targetAccuracy = LOCATION_TARGET_ACCURACY_METERS,
+  maxWaitTimeMs = 15000,
   onProgress,
   signal
 } = {}) => new Promise((resolve, reject) => {
@@ -22,33 +23,33 @@ export const watchForAccuratePosition = ({
 
   let watchId = null;
   let settled = false;
+  let bestPosition = null;
+  let timeoutId = null;
 
   const cleanup = () => {
     if (watchId !== null) {
       navigator.geolocation.clearWatch(watchId);
       watchId = null;
     }
-
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+    }
     if (signal) {
       signal.removeEventListener('abort', handleAbort);
     }
   };
 
-  const finalizeResolve = (position) => {
-    if (settled) {
-      return;
-    }
-
+  const finalizeResolve = (position, status) => {
+    if (settled) return;
     settled = true;
     cleanup();
+    position.status = status; // Attach status for UI
     resolve(position);
   };
 
   const finalizeReject = (error) => {
-    if (settled) {
-      return;
-    }
-
+    if (settled) return;
     settled = true;
     cleanup();
     reject(error);
@@ -67,23 +68,42 @@ export const watchForAccuratePosition = ({
     signal.addEventListener('abort', handleAbort, { once: true });
   }
 
+  // Set timeout to return best position after maxWaitTimeMs
+  timeoutId = setTimeout(() => {
+    if (bestPosition) {
+      finalizeResolve(bestPosition, 'TIMEOUT_FALLBACK');
+    } else {
+      finalizeReject(new Error('Location request timed out. Please check your GPS signal.'));
+    }
+  }, maxWaitTimeMs);
+
   watchId = navigator.geolocation.watchPosition(
     (position) => {
-      if (typeof onProgress === 'function') {
-        onProgress(position);
+      const accuracy = Number(position.coords.accuracy);
+      const isFirst = !bestPosition;
+      
+      if (!bestPosition || accuracy < bestPosition.coords.accuracy) {
+        bestPosition = position;
       }
 
-      const accuracy = Number(position.coords.accuracy);
+      if (typeof onProgress === 'function') {
+        onProgress(bestPosition, isFirst ? 'DETECTING' : 'IMPROVING');
+      }
+
       if (Number.isFinite(accuracy) && accuracy <= targetAccuracy) {
-        finalizeResolve(position);
+        finalizeResolve(position, 'READY');
       }
     },
     (error) => {
-      finalizeReject(error);
+      // Reject if we don't have a fallback best position yet
+      if (!bestPosition) {
+        finalizeReject(error);
+      }
     },
     {
       enableHighAccuracy: true,
-      maximumAge: 0
+      maximumAge: 0,
+      timeout: maxWaitTimeMs
     }
   );
 });

@@ -13,23 +13,24 @@ const getIssueAddress = (issue) => (
 );
 
 const getStatusLabel = (status) => {
-  const normalizedStatus = String(status || 'pending').toLowerCase();
+  const normalizedStatus = String(status || 'NEW').toUpperCase();
   const labels = {
-    assigned_to_dept: 'Assigned To Department',
-    assigned_to_worker: 'Assigned To Worker',
-    in_progress: 'In Progress',
-    waiting_for_head: 'Waiting For Head',
-    waiting_for_verification: 'Waiting For Verification',
-    verified: 'Verified',
-    rework_required: 'Rework Required',
-    completed: 'Completed',
-    closed: 'Closed'
+    NEW: 'Pending Review',
+    ADMIN_APPROVED: 'Admin Approved',
+    DEPARTMENT_ASSIGNED: 'Assigned To Department',
+    ASSIGNED: 'Assigned To Worker',
+    IN_PROGRESS: 'In Progress',
+    WAITING_FOR_DEPARTMENT_APPROVAL: 'Waiting For Dept Head',
+    WAITING_FOR_ADMIN_APPROVAL: 'Waiting For Admin',
+    REWORK_REQUIRED: 'Rework Required',
+    COMPLETED: 'Completed',
+    CLOSED: 'Closed'
   };
 
   return labels[normalizedStatus] || normalizedStatus.replace(/_/g, ' ');
 };
 
-const getStatusClassName = (status) => String(status || 'pending').toLowerCase();
+const getStatusClassName = (status) => String(status || 'NEW').toLowerCase();
 
 const getProofImage = (issue, stage) => (
   stage === 'before'

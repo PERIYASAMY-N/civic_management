@@ -193,16 +193,33 @@ const DepartmentAssignments = () => {
             ) : (
               <div className="assignment-list">
                 {issues.map((issue) => (
-                  <div key={issue._id} className="assignment-card">
-                    <div>
-                      <h3>{issue.title}</h3>
-                      <p>{issue.description}</p>
-                      <div className="meta-line">
-                        <MapPin size={14} />
-                        <span>{issue.location?.address || 'No location'}</span>
-                      </div>
+                  <div key={issue._id} className="assignment-card" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <h3 style={{ margin: 0 }}>{issue.title}</h3>
+                      <span className="priority-badge" style={{
+                        backgroundColor: issue.priority === 'high' ? '#fee2e2' : issue.priority === 'medium' ? '#ffedd5' : '#dcfce7',
+                        color: issue.priority === 'high' ? '#dc2626' : issue.priority === 'medium' ? '#ea580c' : '#16a34a',
+                        padding: '0.25rem 0.5rem',
+                        borderRadius: '4px',
+                        fontSize: '0.75rem',
+                        fontWeight: 'bold',
+                        textTransform: 'uppercase'
+                      }}>
+                        {issue.priority || 'medium'}
+                      </span>
                     </div>
-                    <button className="btn btn-primary" onClick={() => setSelectedIssue(issue)}>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>{issue.description}</p>
+                    <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}><MapPin size={14} /> {issue.location?.address || 'No location'}</span>
+                      <span><strong>Category:</strong> {issue.category || 'Other'}</span>
+                      <span><strong>Status:</strong> {issue.status.replace(/_/g, ' ')}</span>
+                    </div>
+                    {issue.image && (
+                      <div style={{ marginTop: '0.5rem' }}>
+                        <img src={resolveApiAssetUrl(issue.image)} alt="Issue" style={{ height: '100px', width: '100px', objectFit: 'cover', borderRadius: '8px' }} />
+                      </div>
+                    )}
+                    <button className="btn btn-primary" onClick={() => setSelectedIssue(issue)} style={{ alignSelf: 'flex-start', marginTop: '0.5rem' }}>
                       <UserPlus size={18} />
                       Assign Worker
                     </button>
@@ -311,28 +328,63 @@ const DepartmentAssignments = () => {
       </div>
 
       {selectedIssue ? (
-        <div className="modal-overlay">
-          <div className="modal glass fade-in">
+        <div className="modal-overlay" style={{ overflowY: 'auto', padding: '2rem 0' }}>
+          <div className="modal glass fade-in" style={{ width: '90%', maxWidth: '800px', margin: 'auto' }}>
             <h3>Assign: {selectedIssue.title}</h3>
+            
+            <div style={{ display: 'flex', gap: '1rem', fontSize: '0.85rem', marginBottom: '1.5rem', flexWrap: 'wrap', color: 'var(--text-muted)' }}>
+              <span><strong>Category:</strong> {selectedIssue.category || 'Other'}</span>
+              <span><strong>Priority:</strong> {selectedIssue.priority || 'medium'}</span>
+              <span><strong>Location:</strong> {selectedIssue.location?.address || 'Unknown'}</span>
+              <span><strong>Department:</strong> {selectedIssue.department_id?.name || 'Assigned Department'}</span>
+            </div>
+
             <form onSubmit={handleAssign}>
               <div className="input-group">
                 <label>Select Worker</label>
-                <select
-                  value={assignment.worker_id}
-                  onChange={(event) => setAssignment({ ...assignment, worker_id: event.target.value })}
-                  required
-                >
-                  <option value="">Select Worker...</option>
-                  {workers.map((worker) => (
-                    <option key={worker._id} value={worker._id}>{worker.name}</option>
-                  ))}
-                </select>
+                <div style={{ display: 'grid', gap: '0.75rem', maxHeight: '300px', overflowY: 'auto', padding: '0.5rem', border: '1px solid var(--border)', borderRadius: '8px' }}>
+                  {[...workers].sort((a, b) => (a.workload || 0) - (b.workload || 0)).map((worker, index, sortedWorkers) => {
+                      const recommendedWorker = sortedWorkers.find(w => w.status !== 'offline') || sortedWorkers[0];
+                      const isRecommended = worker._id === recommendedWorker?._id;
+                      return (
+                        <label key={worker._id} style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.75rem', border: isRecommended ? '2px solid var(--primary)' : '1px solid var(--border)', borderRadius: '8px', cursor: 'pointer', background: assignment.worker_id === worker._id ? 'rgba(79, 70, 229, 0.1)' : isRecommended ? 'rgba(79, 70, 229, 0.03)' : 'transparent' }}>
+                          <input 
+                            type="radio" 
+                            name="worker" 
+                            value={worker._id} 
+                            checked={assignment.worker_id === worker._id}
+                            onChange={(e) => setAssignment({ ...assignment, worker_id: e.target.value })}
+                            required
+                            style={{ margin: 0 }}
+                          />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <strong style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                {worker.name}
+                                {isRecommended && <span style={{ fontSize: '0.65rem', background: 'var(--primary)', color: 'white', padding: '0.15rem 0.4rem', borderRadius: '4px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>★ Recommended</span>}
+                              </strong>
+                          <span style={{ fontSize: '0.75rem', padding: '0.15rem 0.4rem', borderRadius: '4px', background: worker.status === 'offline' ? '#e2e8f0' : worker.workload > 2 ? '#ffedd5' : '#dcfce7', color: worker.status === 'offline' ? '#64748b' : worker.workload > 2 ? '#ea580c' : '#16a34a' }}>
+                            {worker.status === 'offline' ? 'Offline' : worker.workload > 2 ? 'Busy' : 'Available'}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', gap: '1rem', marginTop: '0.25rem' }}>
+                          <span>Workload: {worker.workload || 0} active</span>
+                          <span>Completed: {worker.completedTasks || 0}</span>
+                          <span>Rating: {worker.rating || '4.5'} ⭐</span>
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })}
+                {workers.length === 0 && <p style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No workers found in this department.</p>}
               </div>
-              <div className="input-group">
+              </div>
+              <div className="input-group" style={{ marginTop: '1rem' }}>
                 <label>Select Volunteer (Optional)</label>
                 <select
                   value={assignment.volunteer_id}
                   onChange={(event) => setAssignment({ ...assignment, volunteer_id: event.target.value })}
+                  style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }}
                 >
                   <option value="">Select Volunteer...</option>
                   {volunteers.map((volunteer) => (
@@ -340,16 +392,28 @@ const DepartmentAssignments = () => {
                   ))}
                 </select>
               </div>
-              <div className="input-group">
+              <div className="input-group" style={{ marginTop: '1rem' }}>
                 <label>Instructions</label>
                 <textarea
                   value={assignment.comments}
                   onChange={(event) => setAssignment({ ...assignment, comments: event.target.value })}
+                  style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)', minHeight: '80px' }}
+                  placeholder="Detailed instructions for the worker..."
                 />
               </div>
-              <div className="btn-row" style={{ marginTop: '1.5rem' }}>
-                <button type="button" className="btn" onClick={() => setSelectedIssue(null)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Confirm Assignment</button>
+
+              {assignment.worker_id && (
+                <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'var(--bg-main)', border: '1px solid var(--border)', borderRadius: '8px' }}>
+                  <h4 style={{ margin: '0 0 0.5rem 0' }}>Assignment Summary</h4>
+                  <p style={{ fontSize: '0.9rem', margin: '0.25rem 0' }}><strong>Worker:</strong> {workers.find(w => w._id === assignment.worker_id)?.name}</p>
+                  <p style={{ fontSize: '0.9rem', margin: '0.25rem 0' }}><strong>Volunteer:</strong> {assignment.volunteer_id ? volunteers.find(v => v._id === assignment.volunteer_id)?.name : 'None'}</p>
+                  <p style={{ fontSize: '0.9rem', margin: '0.25rem 0' }}><strong>Est. Completion:</strong> {selectedIssue.priority === 'high' ? '24 Hours' : selectedIssue.priority === 'medium' ? '72 Hours' : '1 Week'}</p>
+                </div>
+              )}
+
+              <div className="btn-row" style={{ marginTop: '1.5rem', justifyContent: 'flex-end' }}>
+                <button type="button" className="btn" onClick={() => { setSelectedIssue(null); setAssignment({ worker_id: '', volunteer_id: '', comments: '' }); }}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={!assignment.worker_id}>Confirm Assignment</button>
               </div>
             </form>
           </div>

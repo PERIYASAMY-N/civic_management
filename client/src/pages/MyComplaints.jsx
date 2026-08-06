@@ -3,26 +3,28 @@ import { Link } from 'react-router-dom';
 import { Search, ChevronRight, X, Image as ImageIcon, MapPin, Filter, Download } from 'lucide-react';
 import api, { resolveApiAssetUrl } from '../api';
 
-const normalizeIssueStatus = (status) => String(status || 'pending').toLowerCase();
+const normalizeIssueStatus = (status) => String(status || 'NEW').toUpperCase();
 
 const getStatusClassName = (status) => {
   const norm = normalizeIssueStatus(status);
-  if (['completed', 'verified'].includes(norm)) return 'completed';
-  if (['pending', 'assigned_to_dept', 'assigned_to_worker'].includes(norm)) return 'pending';
+  if (['COMPLETED', 'CLOSED'].includes(norm)) return 'completed';
+  if (['NEW', 'ADMIN_APPROVED', 'DEPARTMENT_ASSIGNED', 'ASSIGNED'].includes(norm)) return 'pending';
   return 'in_progress';
 };
 
 const getStatusLabel = (status) => {
   const normalizedStatus = normalizeIssueStatus(status);
   const labels = {
-    assigned_to_dept: 'Assigned',
-    assigned_to_worker: 'Assigned',
-    in_progress: 'In Progress',
-    waiting_for_head: 'In Progress',
-    waiting_for_verification: 'In Progress',
-    verified: 'Completed',
-    rework_required: 'In Progress',
-    completed: 'Completed'
+    NEW: 'Pending',
+    ADMIN_APPROVED: 'Pending',
+    DEPARTMENT_ASSIGNED: 'Assigned',
+    ASSIGNED: 'Assigned',
+    IN_PROGRESS: 'In Progress',
+    WAITING_FOR_DEPARTMENT_APPROVAL: 'In Progress',
+    WAITING_FOR_ADMIN_APPROVAL: 'In Progress',
+    REWORK_REQUIRED: 'In Progress',
+    COMPLETED: 'Completed',
+    CLOSED: 'Completed'
   };
   return labels[normalizedStatus] || 'Pending';
 };

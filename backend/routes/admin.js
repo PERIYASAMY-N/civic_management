@@ -6,11 +6,11 @@ const Complaint = require('../models/Complaint');
 const { auth, authorize } = require('../middleware/auth');
 const { getRoleValues, getStatusValues, hasRole } = require('../utils/userAccess');
 
-const COMPLETED_STATUSES = ['completed'];
-const RESOLVED_STATUSES = ['completed'];
-const ASSIGNED_STATUSES = ['assigned_to_dept', 'assigned_to_worker'];
-const IN_PROGRESS_STATUSES = ['in_progress', 'waiting_for_head', 'waiting_for_verification', 'verified', 'rework_required'];
-const PENDING_STATUSES = ['pending', ...ASSIGNED_STATUSES];
+const COMPLETED_STATUSES = ['COMPLETED'];
+const RESOLVED_STATUSES = ['COMPLETED'];
+const ASSIGNED_STATUSES = ['DEPARTMENT_ASSIGNED', 'ASSIGNED'];
+const IN_PROGRESS_STATUSES = ['IN_PROGRESS', 'WAITING_FOR_DEPARTMENT_APPROVAL', 'WAITING_FOR_ADMIN_APPROVAL', 'REWORK_REQUIRED'];
+const PENDING_STATUSES = ['NEW', 'ADMIN_APPROVED', ...ASSIGNED_STATUSES];
 const MS_PER_HOUR = 1000 * 60 * 60;
 
 const roundPercentage = (completed, total) => {

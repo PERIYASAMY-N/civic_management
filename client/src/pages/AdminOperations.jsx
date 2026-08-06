@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import api, { resolveApiAssetUrl } from '../api';
 import {
   Building,
@@ -56,7 +57,7 @@ const AdminOperations = () => {
   const [loading, setLoading] = useState(true);
   const [pendingUsers, setPendingUsers] = useState([]);
   const [departments, setDepartments] = useState([]);
-  const [unassignedIssues, setUnassignedIssues] = useState([]);
+  const [assignmentIssues, setAssignmentIssues] = useState([]);
   const [verifiedIssues, setVerifiedIssues] = useState([]);
   const [showDeptModal, setShowDeptModal] = useState(false);
   const [newDept, setNewDept] = useState({ name: '', department_id: '', head_id: '' });
@@ -73,7 +74,7 @@ const AdminOperations = () => {
       const complaints = Array.isArray(complaintsRes.data) ? complaintsRes.data : [];
       setPendingUsers(Array.isArray(pendingRes.data) ? pendingRes.data : []);
       setDepartments(Array.isArray(departmentsRes.data) ? departmentsRes.data : []);
-      setUnassignedIssues(complaints.filter((issue) => !issue.department_id));
+      setAssignmentIssues(complaints.filter((issue) => !['verified', 'completed', 'closed'].includes(normalizeStatus(issue.status))));
       setVerifiedIssues(complaints.filter((issue) => normalizeStatus(issue.status) === 'verified'));
     } catch (err) {
       console.error('Error fetching admin operations data', err);
@@ -189,32 +190,64 @@ const AdminOperations = () => {
       {activeTab === 'allocation' ? (
         <div className="glass operations-panel">
           <div className="panel-header">
-            <h2>Unassigned Issues</h2>
-            <p>Route new reports to the right department.</p>
+            <h2>Task Assignment</h2>
+            <p>Assign or reassign issues to departments.</p>
           </div>
 
           <div className="allocation-grid">
-            {unassignedIssues.length === 0 ? (
-              <div className="empty-card">All issues are currently assigned.</div>
+            {assignmentIssues.length === 0 ? (
+              <div className="empty-card">No active issues for assignment.</div>
             ) : (
-              unassignedIssues.map((issue) => (
-                <div key={issue._id} className="allocation-card glass">
-                  <div>
-                    <h3>{issue.title}</h3>
-                    <p>{issue.location?.address || 'No location provided'}</p>
+              assignmentIssues.map((issue) => (
+                <div key={issue._id} className="allocation-card glass" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <h3 style={{ margin: 0 }}>{issue.title}</h3>
+                    <span className="priority-badge" style={{
+                      backgroundColor: issue.priority === 'high' ? '#fee2e2' : issue.priority === 'medium' ? '#ffedd5' : '#dcfce7',
+                      color: issue.priority === 'high' ? '#dc2626' : issue.priority === 'medium' ? '#ea580c' : '#16a34a',
+                      padding: '0.25rem 0.5rem',
+                      borderRadius: '4px',
+                      fontSize: '0.75rem',
+                      fontWeight: 'bold',
+                      textTransform: 'uppercase'
+                    }}>
+                      {issue.priority || 'medium'}
+                    </span>
                   </div>
-                  <select
-                    className="dept-select-modern"
-                    defaultValue=""
-                    onChange={(event) => handleAssignDept(issue._id, event.target.value)}
-                  >
-                    <option value="" disabled>Select Department...</option>
-                    {departments.map((department) => (
-                      <option key={department._id} value={department._id}>
-                        {department.name}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="issue-details" style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                    <p><strong>ID:</strong> {issue._id}</p>
+                    <p><strong>Category:</strong> {issue.category || 'Other'}</p>
+                    <p><strong>Citizen:</strong> {issue.created_by?.name || 'Unknown'}</p>
+                    <p><strong>Department:</strong> {issue.department_id?.name || 'Unassigned'}</p>
+                    <p><strong>Status:</strong> {issue.status.replace(/_/g, ' ')}</p>
+                    <p><strong>Location:</strong> {issue.location?.address || 'No location provided'}</p>
+                    <p><strong>Created:</strong> {new Date(issue.createdAt).toLocaleString()}</p>
+                    <p><strong>Assigned Worker:</strong> {issue.assigned_worker_id?.name || 'None'}</p>
+                    <p><strong>Assigned Volunteer:</strong> {issue.assigned_volunteer_id?.name || 'None'}</p>
+                  </div>
+                  
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
+                    <select
+                      className="dept-select-modern"
+                      defaultValue={issue.department_id?._id || ''}
+                      onChange={(event) => handleAssignDept(issue._id, event.target.value)}
+                    >
+                      <option value="" disabled>Assign Department...</option>
+                      {departments.map((department) => (
+                        <option key={department._id} value={department._id}>
+                          {department.name}
+                        </option>
+                      ))}
+                    </select>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <Link to={`/public/user/track?id=${issue._id}`} className="btn btn-secondary" style={{ flex: 1, textAlign: 'center' }}>
+                        View Details
+                      </Link>
+                      <Link to={`/public/user/track?id=${issue._id}`} className="btn btn-secondary" style={{ flex: 1, textAlign: 'center' }}>
+                        Timeline
+                      </Link>
+                    </div>
+                  </div>
                 </div>
               ))
             )}
