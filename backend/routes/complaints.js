@@ -6,6 +6,7 @@ const path = require('path');
 const Complaint = require('../models/Complaint');
 const Notification = require('../models/Notification');
 const User = require('../models/User');
+const Department = require('../models/Department');
 const upload = require('../middleware/upload');
 const { auth, authorize } = require('../middleware/auth');
 const { getRoleValues, getStatusValues, hasRole, hasStatus } = require('../utils/userAccess');
@@ -1002,59 +1003,131 @@ router.post('/assign-dept/:id', auth, authorize('admin'), async (req, res) => {
 router.post('/assign/:id', auth, authorize('head'), async (req, res) => {
   try {
     const { worker_id, volunteer_id, comments } = req.body;
+    
+    // Verify Complaint exists
     const complaint = await Complaint.findById(req.params.id);
-    if (!complaint) return res.status(404).json({ message: 'Complaint not found' });
+    if (!complaint) return res.status(404).json({ success: false, message: 'Complaint not found' });
+
+    // Verify Department Head has permission
+    if (complaint.department_id?.toString() !== req.user.department_id?.toString()) {
+      return res.status(403).json({ success: false, message: 'You can only assign issues for your own department' });
+    }
+
+    // Verify Department exists
+    const department = await Department.findById(req.user.department_id);
+    if (!department) {
+      return res.status(400).json({ success: false, message: 'Department not found' });
+    }
 
     // If assigning a worker, ensure they are approved and in the department
     if (worker_id) {
       const worker = await User.findById(worker_id);
-      if (
-        !worker ||
-        !hasStatus(worker.status, 'approved') ||
-        worker.department_id.toString() !== req.user.department_id.toString()
-      ) {
-        return res.status(400).json({ message: 'Invalid or unapproved worker selection' });
+      if (!worker) {
+        return res.status(400).json({ success: false, message: 'Worker not found' });
+      }
+      if (!hasStatus(worker.status, 'approved')) {
+        return res.status(400).json({ success: false, message: 'Worker is not active' });
+      }
+      if (worker.department_id?.toString() !== req.user.department_id?.toString()) {
+        return res.status(400).json({ success: false, message: 'Worker does not belong to your department' });
       }
       complaint.assigned_worker_id = worker_id;
+      complaint.assignedWorker = worker_id;
+      complaint.assignedWorkerName = worker.name;
+      complaint.assignedDepartment = worker.department_id;
+      complaint.assignedDepartmentName = department.name;
     }
 
     if (volunteer_id) {
       const volunteer = await User.findById(volunteer_id);
-      if (!volunteer || !hasStatus(volunteer.status, 'approved')) {
-        return res.status(400).json({ message: 'Invalid or unapproved volunteer selection' });
+      if (!volunteer) {
+        return res.status(400).json({ success: false, message: 'Volunteer not found' });
+      }
+      if (!hasStatus(volunteer.status, 'approved')) {
+        return res.status(400).json({ success: false, message: 'Volunteer is not active' });
       }
       complaint.assigned_volunteer_id = volunteer_id;
+      complaint.assignedWorker = volunteer_id;
+      complaint.assignedWorkerName = volunteer.name;
+      complaint.assignedDepartmentName = department.name;
     }
     
-    complaint.status = 'assigned_to_worker';
+    complaint.assignedBy = req.user.id;
+    complaint.instructions = comments;
+    complaint.assignedAt = new Date();
+    complaint.status = 'ASSIGNED';
     complaint.timeline.push({
-      status: 'assigned_to_worker',
+      status: 'ASSIGNED',
       updated_by: req.user.id,
       comments: comments || 'Task assigned to worker'
+    });
+    complaint.history.push({
+      action: 'ASSIGNED',
+      by: req.user.id,
+      details: comments || 'Task assigned to worker'
     });
 
     await complaint.save();
 
     // Create Notification for Assignee
     const assigneeId = worker_id || volunteer_id;
+    let notificationResult = 'skipped';
     if (assigneeId) {
-      await createNotification({
-        userId: assigneeId,
-        title: 'New Task Assigned',
-        message: 'New Task Assigned',
-        type: 'ASSIGNMENT',
-        complaintId: complaint._id
-      });
+      try {
+        await createNotification({
+          userId: assigneeId,
+          title: 'New Task Assigned',
+          message: 'A new civic issue has been assigned to you.',
+          type: 'ASSIGNMENT',
+          complaintId: complaint._id
+        });
+        notificationResult = 'success';
+      } catch (notifErr) {
+        console.error('Failed to create notification for worker:', notifErr);
+        notificationResult = 'failed';
+      }
     }
 
-    await notifyCitizen(complaint, 'assigned_to_worker');
+    try {
+      await notifyCitizen(complaint, 'assigned_to_worker');
+    } catch (citizenNotifErr) {
+      console.error('Failed to notify citizen:', citizenNotifErr);
+    }
 
     const task = await loadTaskForResponse(complaint._id);
-    emitTaskUpdated(task);
+    
+    let socketResult = 'skipped';
+    try {
+      if (io) {
+        emitTaskUpdated(task);
+        io.emit('taskAssigned', task);
+        socketResult = 'success';
+      }
+    } catch (socketErr) {
+      console.error('Socket emission failed:', socketErr);
+      socketResult = 'failed';
+    }
 
-    res.json({ message: 'Task assigned successfully', complaint: task, task });
+    // Development logging
+    if (process.env.NODE_ENV === 'development') {
+      console.log('--- ASSIGNMENT DEBUG ---');
+      console.log('Department Head ID:', req.user.id);
+      console.log('Worker ID:', worker_id || volunteer_id);
+      console.log('Department ID:', req.user.department_id);
+      console.log('Complaint ID:', complaint._id);
+      console.log('Mongo Update Result: Success');
+      console.log('Notification Result:', notificationResult);
+      console.log('Socket Result:', socketResult);
+      console.log('------------------------');
+    }
+
+    res.json({ success: true, message: 'Task assigned successfully', complaint: task });
   } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
+    if (process.env.NODE_ENV === 'development') {
+      console.error('--- ASSIGNMENT ERROR TRACE ---');
+      console.error(err.stack);
+    }
+    res.status(500).json({ success: false, message: 'Server error', error: err.message });
   }
 });
 
@@ -1242,16 +1315,26 @@ router.get('/dept-issues', auth, authorize('head'), async (req, res) => {
 router.get('/my-tasks', auth, authorize('worker', 'volunteer'), async (req, res) => {
   try {
     const query = hasRole(req.user.role, 'worker')
-      ? { assigned_worker_id: req.user.id } 
-      : { assigned_volunteer_id: req.user.id };
+      ? { assignedWorker: req.user.id } 
+      : { assignedWorker: req.user.id };
+
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Worker Dashboard Query:', query);
+    }
     
     const tasks = await Complaint.find(query)
       .populate('created_by', 'name')
       .populate('department_id', 'name department_id')
       .populate('assigned_worker_id', 'name')
       .populate('assigned_volunteer_id', 'name')
+      .populate('assignedWorker', 'name')
       .populate('timeline.updated_by', 'name role')
-      .sort({ updatedAt: -1 });
+      .sort({ assignedAt: -1, updatedAt: -1 });
+
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Returned Tasks count:', tasks.length);
+    }
+
     res.json(tasks);
   } catch (err) {
     res.status(500).json({ message: 'Server error' });

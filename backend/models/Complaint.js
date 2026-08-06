@@ -26,6 +26,7 @@ const complaintSchema = new mongoose.Schema({
       'completed',
       'closed',
       'PENDING',
+      'ASSIGNED',
       'IN_PROGRESS',
       'COMPLETED',
       'CLOSED'
@@ -48,6 +49,21 @@ const complaintSchema = new mongoose.Schema({
       updated_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
       timestamp: { type: Date, default: Date.now },
       comments: String
+    }
+  ],
+  assignedWorker: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  assignedWorkerName: { type: String },
+  assignedDepartment: { type: mongoose.Schema.Types.ObjectId, ref: 'Department' },
+  assignedDepartmentName: { type: String },
+  assignedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  instructions: { type: String },
+  assignedAt: { type: Date },
+  history: [
+    {
+      action: String,
+      date: { type: Date, default: Date.now },
+      by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      details: String
     }
   ],
   work_proof: {

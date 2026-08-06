@@ -22,6 +22,7 @@ import {
   reverseGeocodeAddress
 } from '../utils/location';
 import { formatAccuracyMeters } from '../utils/geolocation';
+import socket from '../realtime/socket';
 
 const GPS_ACCURACY_LIMIT_METERS = 200;
 const SUPPORTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp']);
@@ -222,6 +223,16 @@ const WorkerTasks = () => {
 
   useEffect(() => {
     void fetchTasks();
+  }, [fetchTasks]);
+
+  useEffect(() => {
+    socket.on('taskAssigned', fetchTasks);
+    socket.on('taskUpdated', fetchTasks);
+
+    return () => {
+      socket.off('taskAssigned', fetchTasks);
+      socket.off('taskUpdated', fetchTasks);
+    };
   }, [fetchTasks]);
 
   const getDraft = useCallback((taskId) => drafts[taskId] || createDraft(), [drafts]);

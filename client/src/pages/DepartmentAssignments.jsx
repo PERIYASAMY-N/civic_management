@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { hasRole } from '../utils/userAccess';
 import socket from '../realtime/socket';
+import { useNotification } from '../context/NotificationContext';
 
 const getApiErrorMessage = (error, fallback) => (
   error.response?.data?.message
@@ -58,6 +59,7 @@ const DepartmentAssignments = () => {
   const [selectedIssue, setSelectedIssue] = useState(null);
   const [assignment, setAssignment] = useState({ worker_id: '', volunteer_id: '', comments: '' });
   const [reviewNotes, setReviewNotes] = useState({});
+  const { addToast } = useNotification();
 
   const fetchData = useCallback(async () => {
     try {
@@ -75,7 +77,7 @@ const DepartmentAssignments = () => {
       setVerificationQueue(Array.isArray(verificationRes.data) ? verificationRes.data : []);
     } catch (error) {
       console.error('Error fetching department assignment data', error);
-      alert(getApiErrorMessage(error, 'Unable to load department assignment data'));
+      addToast(getApiErrorMessage(error, 'Unable to load department assignment data'), 'error');
     }
   }, []);
 
@@ -96,12 +98,12 @@ const DepartmentAssignments = () => {
     event.preventDefault();
     try {
       await api.post(`/complaints/assign/${selectedIssue._id}`, assignment);
-      alert('Task assigned successfully.');
+      addToast('Task assigned successfully.', 'success');
       setSelectedIssue(null);
       setAssignment({ worker_id: '', volunteer_id: '', comments: '' });
       await fetchData();
     } catch (error) {
-      alert(getApiErrorMessage(error, 'Assignment failed'));
+      addToast(getApiErrorMessage(error, 'Assignment failed'), 'error');
     }
   };
 
@@ -110,7 +112,7 @@ const DepartmentAssignments = () => {
       await api.post(`/admin/users/${action}/${id}`);
       await fetchData();
     } catch (error) {
-      alert(getApiErrorMessage(error, 'Action failed'));
+      addToast(getApiErrorMessage(error, 'Action failed'), 'error');
     }
   };
 
@@ -120,14 +122,14 @@ const DepartmentAssignments = () => {
         action,
         comments: reviewNotes[issueId] || ''
       });
-      alert(action === 'approve' ? 'Issue verified.' : 'Issue sent back for rework.');
+      addToast(action === 'approve' ? 'Issue verified.' : 'Issue sent back for rework.', 'success');
       setReviewNotes((current) => ({
         ...current,
         [issueId]: ''
       }));
       await fetchData();
     } catch (error) {
-      alert(getApiErrorMessage(error, 'Verification action failed'));
+      addToast(getApiErrorMessage(error, 'Verification action failed'), 'error');
     }
   };
 
