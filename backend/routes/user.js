@@ -10,11 +10,11 @@ const router = express.Router();
 
 const PHONE_REGEX = /^\+?[1-9]\d{9,14}$/;
 const PASSWORD_STRENGTH_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
-const COMPLETED_STATUSES = ['completed', 'closed'];
-const VERIFIED_OR_COMPLETED_STATUSES = ['verified', ...COMPLETED_STATUSES];
+const COMPLETED_STATUSES = ['COMPLETED'];
+const VERIFIED_OR_COMPLETED_STATUSES = ['COMPLETED'];
 
 const normalizedStatusExpression = (fieldPath) => ({
-  $toLower: { $ifNull: [fieldPath, ''] }
+  $toUpper: { $ifNull: [fieldPath, ''] }
 });
 
 const statusInQuery = (statuses) => ({
@@ -95,7 +95,7 @@ const buildActivitySummary = async (user) => {
       }),
       Complaint.countDocuments({
         department_id: user.department_id,
-        status: { $in: ['ASSIGNED', 'IN_PROGRESS', 'WAITING_FOR_DEPARTMENT_APPROVAL', 'WAITING_FOR_ADMIN_APPROVAL', 'REWORK_REQUIRED'] }
+        status: { $in: ['ASSIGNED', 'BEFORE_WORK_SUBMITTED', 'IN_PROGRESS', 'AFTER_WORK_SUBMITTED', 'WAITING_DEPARTMENT_APPROVAL', 'WAITING_ADMIN_APPROVAL'] }
       }),
       Complaint.countDocuments({
         department_id: user.department_id,

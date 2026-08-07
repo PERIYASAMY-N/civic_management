@@ -33,7 +33,7 @@ const getMarkerStatusTone = (status) => {
   const normalizedStatus = normalizeIssueStatus(status);
 
   if (['COMPLETED', 'CLOSED'].includes(normalizedStatus)) return 'completed';
-  if (['IN_PROGRESS', 'WAITING_FOR_DEPARTMENT_APPROVAL', 'WAITING_FOR_ADMIN_APPROVAL', 'REWORK_REQUIRED'].includes(normalizedStatus)) return 'in-progress';
+  if (['IN_PROGRESS', 'WAITING_DEPARTMENT_APPROVAL', 'WAITING_ADMIN_APPROVAL', 'REWORK_REQUIRED'].includes(normalizedStatus)) return 'in-progress';
   return 'pending';
 };
 
@@ -66,8 +66,8 @@ const getStatusLabel = (status) => {
     DEPARTMENT_ASSIGNED: 'Assigned To Department',
     ASSIGNED: 'Assigned To Worker',
     IN_PROGRESS: 'In Progress',
-    WAITING_FOR_DEPARTMENT_APPROVAL: 'Waiting For Dept Head',
-    WAITING_FOR_ADMIN_APPROVAL: 'Waiting For Admin',
+    WAITING_DEPARTMENT_APPROVAL: 'Waiting For Dept Head',
+    WAITING_ADMIN_APPROVAL: 'Waiting For Admin',
     REWORK_REQUIRED: 'Rework Required',
     COMPLETED: 'Completed',
     CLOSED: 'Closed'

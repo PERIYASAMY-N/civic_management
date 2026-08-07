@@ -65,12 +65,12 @@ const TrackComplaint = () => {
       icon: Clock
     },
     {
-      key: 'WAITING_FOR_DEPARTMENT_APPROVAL',
+      key: 'WAITING_DEPARTMENT_APPROVAL',
       label: 'After Work Uploaded',
       icon: Clock
     },
     {
-      key: 'WAITING_FOR_ADMIN_APPROVAL',
+      key: 'WAITING_ADMIN_APPROVAL',
       label: 'Department Verified',
       icon: CheckCircle
     },

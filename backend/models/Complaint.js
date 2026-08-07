@@ -15,18 +15,16 @@ const complaintSchema = new mongoose.Schema({
   status: { 
     type: String, 
     enum: [
-      'NEW',
-      'ADMIN_APPROVED',
-      'DEPARTMENT_ASSIGNED',
+      'PENDING',
       'ASSIGNED',
+      'BEFORE_WORK_SUBMITTED',
       'IN_PROGRESS',
-      'WAITING_FOR_DEPARTMENT_APPROVAL',
-      'WAITING_FOR_ADMIN_APPROVAL',
-      'REWORK_REQUIRED',
-      'COMPLETED',
-      'CLOSED'
+      'AFTER_WORK_SUBMITTED',
+      'WAITING_DEPARTMENT_APPROVAL',
+      'WAITING_ADMIN_APPROVAL',
+      'COMPLETED'
     ], 
-    default: 'NEW' 
+    default: 'PENDING' 
   },
   priority: { 
     type: String, 

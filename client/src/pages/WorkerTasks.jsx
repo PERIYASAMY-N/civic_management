@@ -41,7 +41,7 @@ const STATUS_COPY = {
     title: 'After Work Submission',
     text: 'Upload completed civic work proof'
   },
-  WAITING_FOR_APPROVAL: {
+  WAITING_APPROVAL: {
     badge: 'WAITING',
     tone: 'waiting',
     title: 'Waiting for Department Verification',
@@ -119,8 +119,8 @@ const getTaskStage = (task) => {
     return 'IN_PROGRESS';
   }
 
-  if (['WAITING_FOR_DEPARTMENT_APPROVAL', 'WAITING_FOR_ADMIN_APPROVAL'].includes(status)) {
-    return 'WAITING_FOR_APPROVAL';
+  if (['WAITING_DEPARTMENT_APPROVAL', 'WAITING_ADMIN_APPROVAL'].includes(status)) {
+    return 'WAITING_APPROVAL';
   }
 
   if (['COMPLETED', 'CLOSED'].includes(status)) {
@@ -481,7 +481,7 @@ const WorkerTasks = () => {
 
       console.log([...formData.entries()]);
 
-      const response = await axios.patch(`${API_BASE_URL}/tasks/${task._id}/before`, formData, {
+      const response = await axios.patch(`${API_BASE_URL}/complaints/${task._id}/before`, formData, {
         headers: {
           Authorization: `Bearer ${token}`
         }
@@ -532,7 +532,7 @@ const WorkerTasks = () => {
       formData.append('billLocation', JSON.stringify(draft.afterLocation));
       console.log('After work form data', Array.from(formData.entries()));
 
-      const response = await api.patch(`/tasks/${task._id}/after`, formData);
+      const response = await api.patch(`/complaints/${task._id}/after`, formData);
 
       clearDraft(task._id);
       replaceTask(response.data?.complaint || response.data?.task);
@@ -1005,7 +1005,7 @@ const WorkerTasks = () => {
         }
         if (activeTab === 'PENDING') return stage === 'PENDING';
         if (activeTab === 'IN_PROGRESS') return stage === 'IN_PROGRESS';
-        if (activeTab === 'COMPLETED') return stage === 'COMPLETED' || stage === 'WAITING_FOR_APPROVAL';
+        if (activeTab === 'COMPLETED') return stage === 'COMPLETED' || stage === 'WAITING_APPROVAL';
         return true;
       }).length === 0 ? (
         <div className="worker-empty-card glass">
@@ -1027,7 +1027,7 @@ const WorkerTasks = () => {
           }
           if (activeTab === 'PENDING') return stage === 'PENDING';
           if (activeTab === 'IN_PROGRESS') return stage === 'IN_PROGRESS';
-          if (activeTab === 'COMPLETED') return stage === 'COMPLETED' || stage === 'WAITING_FOR_APPROVAL';
+          if (activeTab === 'COMPLETED') return stage === 'COMPLETED' || stage === 'WAITING_APPROVAL';
           return true;
         }).map((task) => {
           const stage = getTaskStage(task);
@@ -1106,7 +1106,7 @@ const WorkerTasks = () => {
               {renderMetaCard(task, stage)}
               {stage === 'PENDING' ? renderBeforeSection(task, draft) : null}
               {stage === 'IN_PROGRESS' ? renderAfterSection(task, draft) : null}
-              {stage === 'WAITING_FOR_APPROVAL' ? renderWaitingSection(task) : null}
+              {stage === 'WAITING_APPROVAL' ? renderWaitingSection(task) : null}
               {stage === 'COMPLETED' ? renderCompletedSection(task) : null}
             </article>
           );

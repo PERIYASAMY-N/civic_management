@@ -65,17 +65,21 @@ const AdminOperations = () => {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [pendingRes, departmentsRes, complaintsRes] = await Promise.all([
+      const [pendingRes, departmentsRes, complaintsRes, approvalsRes] = await Promise.all([
         api.get('/auth/pending-staff'),
         api.get('/admin/departments'),
-        api.get('/complaints')
+        api.get('/complaints'),
+        api.get('/complaints/admin-approvals')
       ]);
 
       const complaints = Array.isArray(complaintsRes.data) ? complaintsRes.data : [];
       setPendingUsers(Array.isArray(pendingRes.data) ? pendingRes.data : []);
       setDepartments(Array.isArray(departmentsRes.data) ? departmentsRes.data : []);
-      setAssignmentIssues(complaints.filter((issue) => !['verified', 'completed', 'closed'].includes(normalizeStatus(issue.status))));
-      setVerifiedIssues(complaints.filter((issue) => normalizeStatus(issue.status) === 'verified'));
+      setAssignmentIssues(complaints.filter((issue) => ['PENDING'].includes(normalizeStatus(issue.status))));
+      
+      // Strict loading for WAITING_ADMIN_APPROVAL from backend ONLY
+      const approvals = Array.isArray(approvalsRes.data) ? approvalsRes.data : [];
+      setVerifiedIssues(approvals);
     } catch (err) {
       console.error('Error fetching admin operations data', err);
       alert(getApiErrorMessage(err, 'Unable to load admin operations data'));
@@ -117,16 +121,16 @@ const AdminOperations = () => {
     }
   };
 
-  const handleCloseIssue = async (issueId) => {
+  const handleAdminReview = async (issueId, action) => {
     try {
-      await api.patch(`/issues/${issueId}/verify`, {
-        action: 'verify',
-        comments: 'Admin verified final work proof'
+      await api.patch(`/complaints/${issueId}/admin-review`, {
+        action,
+        comments: action === 'approve' ? 'Admin verified final work proof' : 'Admin rejected the work and requested rework'
       });
-      alert('Issue verified and closed successfully.');
+      alert(action === 'approve' ? 'Issue verified and closed successfully.' : 'Issue rejected and sent back to worker.');
       await fetchData();
     } catch (error) {
-      alert(getApiErrorMessage(error, 'Unable to verify this issue'));
+      alert(getApiErrorMessage(error, `Unable to ${action} this issue`));
     }
   };
 
@@ -285,13 +289,29 @@ const AdminOperations = () => {
                     <ProofCard label="Bill Image" src={getProofImage(issue, 'bill')} alt={`${issue.title} bill`} meta={getProofGeo(issue, 'bill')} />
                   </div>
 
-                  <button
-                    className="btn btn-primary"
-                    style={{ justifyContent: 'center' }}
-                    onClick={() => void handleCloseIssue(issue._id)}
-                  >
-                    Verify & Close
-                  </button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {normalizeStatus(issue.status) !== 'WAITING_ADMIN_APPROVAL' && (
+                      <p style={{ color: 'var(--danger)', fontSize: '0.875rem', margin: 0 }}>This complaint is waiting for department verification.</p>
+                    )}
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ flex: 1, justifyContent: 'center' }}
+                        onClick={() => void handleAdminReview(issue._id, 'reject')}
+                        disabled={normalizeStatus(issue.status) !== 'WAITING_ADMIN_APPROVAL'}
+                      >
+                        Reject & Rework
+                      </button>
+                      <button
+                        className="btn btn-primary"
+                        style={{ flex: 1, justifyContent: 'center' }}
+                        onClick={() => void handleAdminReview(issue._id, 'approve')}
+                        disabled={normalizeStatus(issue.status) !== 'WAITING_ADMIN_APPROVAL'}
+                      >
+                        Verify & Close
+                      </button>
+                    </div>
+                  </div>
                 </article>
               ))
             )}

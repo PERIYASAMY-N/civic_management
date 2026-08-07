@@ -19,11 +19,9 @@ const TASK_UPLOAD_DIRECTORY = path.join(__dirname, '..', 'uploads', 'tasks');
 const SAFE_IMAGE_PATTERN = /^\/uploads\/issues\/[A-Za-z0-9._-]+\.(jpg|jpeg|png)$/i;
 const SAFE_PROOF_IMAGE_PATTERN = /^\/uploads\/proofs\/[A-Za-z0-9._-]+\.(jpg|jpeg|png|webp)$/i;
 const SAFE_TASK_IMAGE_PATTERN = /^\/uploads\/tasks\/[A-Za-z0-9._-]+\.(jpg|jpeg|png|webp)$/i;
-const WORKER_STARTABLE_STATUSES = ['ASSIGNED', 'REWORK_REQUIRED'];
-const WORKER_WAITING_FOR_HEAD_STATUS = 'WAITING_FOR_DEPARTMENT_APPROVAL';
-const LEGACY_WORKER_REVIEW_STATUS = 'WAITING_FOR_ADMIN_APPROVAL';
-const WORKER_REVIEW_STATUSES = [WORKER_WAITING_FOR_HEAD_STATUS, LEGACY_WORKER_REVIEW_STATUS];
-const ADMIN_CLOSABLE_STATUS = 'WAITING_FOR_ADMIN_APPROVAL';
+const WORKER_STARTABLE_STATUSES = ['ASSIGNED'];
+const WORKER_REVIEW_STATUSES = ['WAITING_DEPARTMENT_APPROVAL'];
+const ADMIN_CLOSABLE_STATUS = 'WAITING_ADMIN_APPROVAL';
 const ADMIN_CLOSED_STATUS = 'COMPLETED';
 const LOCATION_MAX_ACCURACY_METERS = 10000; // Relaxed to allow frontend 15s timeout fallbacks
 const TASK_POPULATION = [
@@ -118,7 +116,7 @@ const getUploadedFile = (files, fieldNames) => {
 };
 
 const normalizeBodyString = (value) => (typeof value === 'string' ? value.trim() : '');
-const normalizeStatus = (status) => String(status || '').toLowerCase();
+const normalizeStatus = (status) => String(status || '').toUpperCase();
 
 const toUploadedPath = (file) => {
   if (!file?.filename) {
@@ -628,8 +626,13 @@ const submitBeforeWork = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Not assigned to this task' });
     }
 
-    if (!WORKER_STARTABLE_STATUSES.includes(complaint.status)) {
-      return res.status(400).json({ success: false, message: 'This task is not ready for before-work submission right now' });
+    if (normalizeStatus(complaint.status) !== 'ASSIGNED') {
+      return res.status(400).json({ 
+        success: false, 
+        currentStatus: complaint.status,
+        expectedStatus: 'ASSIGNED',
+        message: 'This task is not ready for before-work submission right now' 
+      });
     }
 
     const beforeUpload = req.file || getUploadedFile(req.files, ['beforeImage', 'beforeImageFile', 'proofImage', 'image']);
@@ -719,8 +722,13 @@ const submitAfterWork = async (req, res) => {
       return res.status(403).json({ message: 'Not assigned to this task' });
     }
 
-    if (complaint.status !== 'IN_PROGRESS') {
-      return res.status(400).json({ message: 'After-work submission is allowed only for in-progress tasks', currentStatus: complaint.status, expectedStatus: 'IN_PROGRESS' });
+    if (normalizeStatus(complaint.status) !== 'IN_PROGRESS') {
+      return res.status(400).json({ 
+        success: false,
+        message: 'After-work submission is allowed only for in-progress tasks', 
+        currentStatus: complaint.status, 
+        expectedStatus: 'IN_PROGRESS' 
+      });
     }
 
     const beforeWork = getBeforeWorkRecord(complaint);
@@ -781,9 +789,9 @@ const submitAfterWork = async (req, res) => {
       billAddress: finalBillGeo.address,
       billTimestamp: finalBillGeo.time
     });
-    complaint.status = WORKER_WAITING_FOR_HEAD_STATUS;
+    complaint.status = 'WAITING_DEPARTMENT_APPROVAL';
     complaint.timeline.push({
-      status: WORKER_WAITING_FOR_HEAD_STATUS,
+      status: 'WAITING_DEPARTMENT_APPROVAL',
       updated_by: req.user.id,
       comments: 'Worker completed the task and submitted after-work proof with bill'
     });
@@ -992,9 +1000,9 @@ router.post('/assign-dept/:id', auth, authorize('admin'), async (req, res) => {
     if (!complaint) return res.status(404).json({ message: 'Complaint not found' });
 
     complaint.department_id = department_id;
-    complaint.status = 'DEPARTMENT_ASSIGNED';
+    complaint.status = 'PENDING';
     complaint.timeline.push({
-      status: 'DEPARTMENT_ASSIGNED',
+      status: 'PENDING',
       updated_by: req.user.id,
       comments: 'Assigned to department'
     });
@@ -1010,13 +1018,24 @@ router.post('/assign-dept/:id', auth, authorize('admin'), async (req, res) => {
 });
 
 // Assign Complaint to Worker (Dept Head Only)
-router.post('/assign/:id', auth, authorize('head'), async (req, res) => {
+router.patch('/:id/assign-worker', auth, authorize('head'), async (req, res) => {
   try {
     const { worker_id, volunteer_id, comments } = req.body;
     
     // Verify Complaint exists
     const complaint = await Complaint.findById(req.params.id);
     if (!complaint) return res.status(404).json({ success: false, message: 'Complaint not found' });
+
+    // Enforce E2E status validation (can be assigned if new/department_assigned or reassigned)
+    const current = normalizeStatus(complaint.status);
+    if (!['PENDING', 'ASSIGNED', 'IN_PROGRESS'].includes(current)) {
+      return res.status(400).json({ 
+        success: false, 
+        currentStatus: current,
+        expectedStatus: 'PENDING',
+        message: 'Only pending or assigned tasks can be assigned'
+      });
+    }
 
     // Verify Department Head has permission
     if (complaint.department_id?.toString() !== req.user.department_id?.toString()) {
@@ -1167,6 +1186,18 @@ router.patch('/tasks/:id/after', auth, authorize('worker', 'volunteer'), submitA
 router.post('/tasks/:id/after', auth, authorize('worker', 'volunteer'), submitAfterWork);
 router.post('/update-status/:id', auth, authorize('worker', 'volunteer'), submitAfterWork);
 
+router.get('/admin-approvals', auth, authorize('admin'), async (req, res) => {
+  try {
+    const issues = await Complaint.find({
+      status: 'WAITING_ADMIN_APPROVAL'
+    }).populate(TASK_POPULATION).sort({ createdAt: -1 });
+
+    res.json(issues);
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 router.get('/verification-queue', auth, authorize('head'), async (req, res) => {
   try {
     const issues = await Complaint.find({
@@ -1190,31 +1221,41 @@ const reviewByDepartmentHead = async (req, res) => {
     const complaint = await Complaint.findById(req.params.id);
 
     if (!complaint) {
-      return res.status(404).json({ message: 'Complaint not found' });
+      return res.status(404).json({ success: false, message: 'Complaint not found' });
     }
 
     if (complaint.department_id?.toString() !== req.user.department_id?.toString()) {
-      return res.status(403).json({ message: 'You can only verify work from your own department' });
+      return res.status(403).json({ success: false, message: 'You can only verify work from your own department' });
     }
 
-    if (!WORKER_REVIEW_STATUSES.includes(normalizeStatus(complaint.status))) {
-      return res.status(400).json({ message: 'Only tasks waiting for department head review can be reviewed' });
+    if (normalizeStatus(complaint.status) !== 'WAITING_DEPARTMENT_APPROVAL') {
+      return res.status(400).json({ 
+        success: false, 
+        currentStatus: complaint.status, 
+        expectedStatus: 'WAITING_DEPARTMENT_APPROVAL', 
+        message: 'Department review is only allowed when the task is waiting for department approval.' 
+      });
     }
 
     if (!['approve', 'reject'].includes(action)) {
-      return res.status(400).json({ message: 'Verification action must be either approve or reject' });
+      return res.status(400).json({ success: false, message: 'Verification action must be either approve or reject' });
     }
 
     const approved = action === 'approve';
-    complaint.status = approved ? ADMIN_CLOSABLE_STATUS : 'REWORK_REQUIRED';
-    complaint.verification = {
-      status: approved ? 'approved' : 'rejected',
-      verified_by: req.user.id,
-      verified_at: new Date(),
-      comments
-    };
+    complaint.status = approved ? 'WAITING_ADMIN_APPROVAL' : 'IN_PROGRESS';
+    
+    if (approved) {
+      complaint.departmentApproved = true;
+      complaint.departmentApprovedAt = new Date();
+      complaint.departmentApprovedBy = req.user.id;
+      complaint.departmentVerificationNotes = comments;
+    } else {
+      complaint.departmentRejected = true;
+      complaint.departmentRejectionReason = comments;
+    }
+
     complaint.timeline.push({
-      status: approved ? ADMIN_CLOSABLE_STATUS : 'REWORK_REQUIRED',
+      status: complaint.status,
       updated_by: req.user.id,
       comments: comments || (
         approved
@@ -1228,11 +1269,12 @@ const reviewByDepartmentHead = async (req, res) => {
     emitTaskUpdated(task);
 
     if (approved) {
+      io.emit('waitingAdminApproval', task);
       const adminIds = await getAdminIds();
       await createNotificationsForUsers({
         userIds: adminIds,
-        title: 'Task verified with bill',
-        message: 'Task verified with bill',
+        title: 'Complaint Ready for Final Verification',
+        message: 'A complaint has been verified by the department and is ready for final admin closure.',
         type: 'SUCCESS',
         complaintId: complaint._id
       });
@@ -1260,44 +1302,71 @@ const reviewByDepartmentHead = async (req, res) => {
 
 const verifyByAdmin = async (req, res) => {
   try {
+    const action = String(req.body.action || 'approve').trim().toLowerCase();
     const comments = String(req.body.comments || '').trim();
     const complaint = await Complaint.findById(req.params.id);
 
     if (!complaint) {
-      return res.status(404).json({ message: 'Complaint not found' });
+      return res.status(404).json({ success: false, message: 'Complaint not found' });
     }
 
-    if (normalizeStatus(complaint.status) !== ADMIN_CLOSABLE_STATUS) {
-      return res.status(400).json({ message: 'Only verified issues can be closed by admin' });
+    if (normalizeStatus(complaint.status) !== 'WAITING_ADMIN_APPROVAL') {
+      return res.status(400).json({ 
+        success: false, 
+        currentStatus: complaint.status, 
+        expectedStatus: 'WAITING_ADMIN_APPROVAL', 
+        message: 'Admin review is only allowed when the task is waiting for admin approval.' 
+      });
+    }
+    
+    if (!['approve', 'reject'].includes(action)) {
+      return res.status(400).json({ success: false, message: 'Verification action must be either approve or reject' });
     }
 
-    complaint.status = ADMIN_CLOSED_STATUS;
-    complaint.verifiedBy = req.user.id;
-    complaint.verifiedAt = new Date();
+    const approved = action === 'approve';
+    complaint.status = approved ? 'COMPLETED' : 'IN_PROGRESS';
+    
+    if (approved) {
+      complaint.adminVerifiedBy = req.user.id;
+      complaint.adminVerifiedAt = new Date();
+      complaint.completedAt = new Date();
+    } else {
+      complaint.adminRejectedReason = comments;
+    }
+    
     complaint.timeline.push({
-      status: ADMIN_CLOSED_STATUS,
+      status: complaint.status,
       updated_by: req.user.id,
-      comments: comments || 'Admin verified and closed the issue after department approval'
+      comments: comments || (approved ? 'Admin verified and closed the issue' : 'Admin rejected the issue and sent it back for rework')
     });
 
     await complaint.save();
-    await notifyCitizen(complaint, 'completed');
+    
+    if (approved) {
+      await notifyCitizen(complaint, 'completed');
+    }
+    
     await createNotificationsForUsers({
       userIds: await getDepartmentHeadIds(complaint.department_id),
-      title: 'Issue verified by admin',
-      message: `Admin verified and closed "${complaint.title}".`,
-      type: 'SUCCESS',
+      title: approved ? 'Issue verified by admin' : 'Issue rejected by admin',
+      message: approved ? `Admin verified and closed "${complaint.title}".` : `Admin rejected "${complaint.title}" and sent it back.`,
+      type: approved ? 'SUCCESS' : 'ERROR',
       complaintId: complaint._id
     });
+    
     await createNotificationsForUsers({
       userIds: getAssignedUserIds(complaint),
-      title: 'Task verified by admin',
-      message: `Admin verified and closed "${complaint.title}".`,
-      type: 'SUCCESS',
+      title: approved ? 'Task verified by admin' : 'Task rejected by admin',
+      message: approved ? `Admin verified and closed "${complaint.title}".` : `Admin rejected "${complaint.title}" and sent it back.`,
+      type: approved ? 'SUCCESS' : 'ERROR',
       complaintId: complaint._id
     });
+    
     const task = await loadTaskForResponse(complaint._id);
     emitTaskUpdated(task);
+    if (approved) {
+      io.emit('complaintCompleted', task);
+    }
 
     res.json({ success: true, message: 'Issue verified and closed successfully', complaint: task, task });
   } catch (error) {
@@ -1317,17 +1386,15 @@ const verifyTask = async (req, res) => {
   return reviewByDepartmentHead(req, res);
 };
 
-router.patch('/:id/verify', auth, authorize('admin', 'head'), verifyTask);
-router.patch('/tasks/:id/verify', auth, authorize('admin', 'head'), verifyTask);
-router.post('/verify/:id', auth, authorize('head'), reviewByDepartmentHead);
-router.post('/close/:id', auth, authorize('admin'), verifyByAdmin);
+router.patch('/:id/department-review', auth, authorize('head'), reviewByDepartmentHead);
+router.patch('/:id/admin-review', auth, authorize('admin'), verifyByAdmin);
 
 // Get Dept Specific Issues (Unassigned)
 router.get('/dept-issues', auth, authorize('head'), async (req, res) => {
   try {
     const issues = await Complaint.find({ 
       department_id: req.user.department_id,
-      status: 'assigned_to_dept',
+      status: 'PENDING',
       assigned_worker_id: { $exists: false }
     }).sort({ createdAt: -1 });
     res.json(issues);

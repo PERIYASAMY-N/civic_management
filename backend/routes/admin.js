@@ -8,9 +8,9 @@ const { getRoleValues, getStatusValues, hasRole } = require('../utils/userAccess
 
 const COMPLETED_STATUSES = ['COMPLETED'];
 const RESOLVED_STATUSES = ['COMPLETED'];
-const ASSIGNED_STATUSES = ['DEPARTMENT_ASSIGNED', 'ASSIGNED'];
-const IN_PROGRESS_STATUSES = ['IN_PROGRESS', 'WAITING_FOR_DEPARTMENT_APPROVAL', 'WAITING_FOR_ADMIN_APPROVAL', 'REWORK_REQUIRED'];
-const PENDING_STATUSES = ['NEW', 'ADMIN_APPROVED', ...ASSIGNED_STATUSES];
+const ASSIGNED_STATUSES = ['ASSIGNED'];
+const IN_PROGRESS_STATUSES = ['BEFORE_WORK_SUBMITTED', 'IN_PROGRESS', 'AFTER_WORK_SUBMITTED', 'WAITING_DEPARTMENT_APPROVAL', 'WAITING_ADMIN_APPROVAL'];
+const PENDING_STATUSES = ['PENDING', ...ASSIGNED_STATUSES];
 const MS_PER_HOUR = 1000 * 60 * 60;
 
 const roundPercentage = (completed, total) => {
@@ -19,7 +19,7 @@ const roundPercentage = (completed, total) => {
 };
 
 const normalizedStatusExpression = (fieldPath) => ({
-  $toLower: { $ifNull: [fieldPath, ''] }
+  $toUpper: { $ifNull: [fieldPath, ''] }
 });
 
 const statusInExpression = (fieldPath, statuses) => ({

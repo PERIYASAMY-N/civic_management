@@ -97,7 +97,7 @@ const DepartmentAssignments = () => {
   const handleAssign = async (event) => {
     event.preventDefault();
     try {
-      await api.post(`/complaints/assign/${selectedIssue._id}`, assignment);
+      await api.patch(`/complaints/${selectedIssue._id}/assign-worker`, assignment);
       addToast('Task assigned successfully.', 'success');
       setSelectedIssue(null);
       setAssignment({ worker_id: '', volunteer_id: '', comments: '' });
@@ -118,7 +118,7 @@ const DepartmentAssignments = () => {
 
   const handleVerification = async (issueId, action) => {
     try {
-      await api.patch(`/tasks/${issueId}/verify`, {
+      await api.patch(`/complaints/${issueId}/department-review`, {
         action,
         comments: reviewNotes[issueId] || ''
       });

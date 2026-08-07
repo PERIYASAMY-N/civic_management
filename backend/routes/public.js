@@ -6,9 +6,9 @@ const { getRoleValues } = require('../utils/userAccess');
 
 const router = express.Router();
 
-const COMPLETED_STATUSES = ['COMPLETED', 'CLOSED'];
-const IN_PROGRESS_STATUSES = ['IN_PROGRESS', 'WAITING_FOR_DEPARTMENT_APPROVAL', 'WAITING_FOR_ADMIN_APPROVAL', 'REWORK_REQUIRED'];
-const PENDING_STATUSES = ['NEW', 'ADMIN_APPROVED', 'DEPARTMENT_ASSIGNED', 'ASSIGNED'];
+const COMPLETED_STATUSES = ['COMPLETED'];
+const IN_PROGRESS_STATUSES = ['BEFORE_WORK_SUBMITTED', 'IN_PROGRESS', 'AFTER_WORK_SUBMITTED', 'WAITING_DEPARTMENT_APPROVAL', 'WAITING_ADMIN_APPROVAL'];
+const PENDING_STATUSES = ['PENDING', 'ASSIGNED'];
 
 const roundPercentage = (completed, total) => {
   if (!total) return 0;
@@ -16,11 +16,11 @@ const roundPercentage = (completed, total) => {
 };
 
 const normalizedStatusExpression = (fieldPath) => ({
-  $toLower: { $ifNull: [fieldPath, ''] }
+  $toUpper: { $ifNull: [fieldPath, ''] }
 });
 
 const statusInExpression = (fieldPath, statuses) => ({
-  $in: [normalizedStatusExpression(fieldPath), statuses.map(s => s.toLowerCase())]
+  $in: [normalizedStatusExpression(fieldPath), statuses]
 });
 
 // GET /api/public/dashboard

@@ -20,8 +20,8 @@ const getStatusLabel = (status) => {
     DEPARTMENT_ASSIGNED: 'Assigned To Department',
     ASSIGNED: 'Assigned To Worker',
     IN_PROGRESS: 'In Progress',
-    WAITING_FOR_DEPARTMENT_APPROVAL: 'Waiting For Dept Head',
-    WAITING_FOR_ADMIN_APPROVAL: 'Waiting For Admin',
+    WAITING_DEPARTMENT_APPROVAL: 'Waiting For Dept Head',
+    WAITING_ADMIN_APPROVAL: 'Waiting For Admin',
     REWORK_REQUIRED: 'Rework Required',
     COMPLETED: 'Completed',
     CLOSED: 'Closed'
